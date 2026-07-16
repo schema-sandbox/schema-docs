@@ -180,12 +180,6 @@
       border-color: #a7b2c3;
     }
 
-    .commercial {
-      color: var(--accent-dark);
-      background: var(--accent-soft);
-      border-color: rgb(11 99 206 / 0.18);
-    }
-
     .hero-note {
       max-width: 590px;
       margin-top: 18px;
@@ -362,10 +356,6 @@
       border-color: #ffffff;
     }
 
-    .online-box {
-      background: var(--accent-soft);
-    }
-
     footer {
       padding: 34px 0 46px;
       color: var(--muted);
@@ -432,7 +422,6 @@
       <a href="#capabilities">Capabilities</a>
       <a href="#download">Download</a>
       <a href="https://github.com/schema-sandbox/schema-docs">GitHub</a>
-      <a href="https://schemadocs.cn">Online conversion</a>
     </nav>
   </header>
 
@@ -445,9 +434,8 @@
         <div class="cta-row">
           <a class="button primary" href="https://github.com/schema-sandbox/schema-docs/releases/tag/v0.1.0">Download for Windows</a>
           <a class="button secondary" href="https://github.com/schema-sandbox/schema-docs">Open-source repository</a>
-          <a class="button commercial" href="https://schemadocs.cn">Online paid conversion</a>
         </div>
-        <p class="hero-note">The desktop app is open source and free to install. If you do not want to install software, the planned online edition at schemadocs.cn will offer paid large-document conversion.</p>
+        <p class="hero-note">The desktop app is open source and free to install. This public preview focuses on local conversion, local masking, and review before AI handoff.</p>
         <div class="metric-strip" aria-label="Verification highlights">
           <div class="metric"><strong>5M</strong><span>word-scale files verified in prior manual workflows</span></div>
           <div class="metric"><strong>3,000+</strong><span>page PDF workflows verified in prior manual testing</span></div>
@@ -496,17 +484,14 @@
             <a class="button" href="https://github.com/schema-sandbox/schema-docs">View source</a>
           </div>
         </div>
-        <div class="panel online-box">
-          <h2>No-install online conversion is planned.</h2>
-          <p>schemadocs.cn is reserved for users who prefer paid online conversion instead of installing the desktop app locally.</p>
+        <div class="panel">
+          <h2>Built for local review before AI handoff.</h2>
+          <p>Schema Docs helps you inspect and clean document context before a model sees it, with evidence records that can be checked later.</p>
           <ul class="plain-list">
-            <li>Best for one-off large files where setup time matters.</li>
-            <li>Positioned beside, not instead of, the open-source desktop release.</li>
-            <li>Commercial service terms will apply when the online edition launches.</li>
+            <li>Preview the exact AI context before confirming any send workflow.</li>
+            <li>Mask sensitive content locally and keep restoration maps out of persisted records.</li>
+            <li>Export SDXP packages with Markdown, manifest, evidence, and trust reports.</li>
           </ul>
-          <div class="cta-row">
-            <a class="button commercial" href="https://schemadocs.cn">Visit schemadocs.cn</a>
-          </div>
         </div>
       </div>
     </section>
