@@ -1,0 +1,121 @@
+{
+  "rules": [
+    {
+      "name": "secret",
+      "type": "replace",
+      "pattern": "(\\b(?:api[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key|client[_-]?secret|secret|password|token)\\b|\\u5bc6\\u7801|\\u53e3\\u4ee4|\\u79d8\\u94a5)(\\s*[:=\\uff1a]\\s*)([\"']?)([^\\s\"']{4,})(\\3)",
+      "flags": "gi",
+      "maskType": "secret",
+      "replaceGroup": 4
+    },
+    {
+      "name": "bearer_token",
+      "type": "replace",
+      "pattern": "\\b(authorization\\s*[:=\\uff1a]\\s*Bearer\\s+|Bearer\\s+)([a-zA-Z0-9._~+/=-]{12,})",
+      "flags": "gi",
+      "maskType": "secret",
+      "replaceGroup": 2
+    },
+    {
+      "name": "api_key_like",
+      "type": "simple",
+      "pattern": "\\b(?:sk|key|rk|pk)-[a-zA-Z0-9][a-zA-Z0-9_-]{5,}\\b",
+      "flags": "g",
+      "maskType": "secret"
+    },
+    {
+      "name": "cloud_access_key",
+      "type": "simple",
+      "pattern": "\\b(?:AKIA|ASIA|LTAI|AIza)[a-zA-Z0-9_-]{12,}\\b",
+      "flags": "g",
+      "maskType": "secret"
+    },
+    {
+      "name": "github_token",
+      "type": "simple",
+      "pattern": "\\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{20,}\\b",
+      "flags": "g",
+      "maskType": "secret"
+    },
+    {
+      "name": "stripe_key",
+      "type": "simple",
+      "pattern": "\\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{16,}\\b",
+      "flags": "g",
+      "maskType": "secret"
+    },
+    {
+      "name": "slack_token",
+      "type": "simple",
+      "pattern": "\\bxox[abprs]-[A-Za-z0-9-]{20,}\\b",
+      "flags": "g",
+      "maskType": "secret"
+    },
+    {
+      "name": "ssh_private_key_block",
+      "type": "simple",
+      "pattern": "-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----",
+      "flags": "g",
+      "maskType": "secret"
+    },
+    {
+      "name": "labeled_uuid_token",
+      "type": "replace",
+      "pattern": "\\b(token|session[_-]?token|auth[_-]?token|credential[_-]?id)\\b(\\s*[:=\\uff1a]\\s*)([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\\b",
+      "flags": "gi",
+      "maskType": "secret",
+      "replaceGroup": 3
+    },
+    {
+      "name": "email",
+      "type": "simple",
+      "pattern": "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}",
+      "flags": "g",
+      "maskType": "email"
+    },
+    {
+      "name": "ip",
+      "type": "simple",
+      "pattern": "\\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\b",
+      "flags": "g",
+      "maskType": "ip"
+    },
+    {
+      "name": "cn_resident_id",
+      "type": "simple",
+      "pattern": "\\b[1-9]\\d{5}(?:18|19|20)\\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\\d|3[01])\\d{3}[\\dXx]\\b",
+      "flags": "g",
+      "maskType": "id"
+    },
+    {
+      "name": "cn_bank_card_labeled",
+      "type": "replace",
+      "pattern": "(\\u94f6\\u884c\\u5361\\u53f7|\\u94f6\\u884c\\u5361|\\u5361\\u53f7|\\bbank\\s*card(?:\\s*number)?\\b|\\bcard\\s*(?:number|no\\.?)\\b)(\\s*(?:[:=\\uff1a]\\s*)?)((?:\\d[ -]?){12,18}\\d)",
+      "flags": "gi",
+      "maskType": "bank",
+      "replaceGroup": 3
+    },
+    {
+      "name": "cn_bank_card_luhn",
+      "type": "bank_card",
+      "pattern": "\\b(?:\\d{13,19}|(?:\\d{4} ){3}\\d{4}(?: \\d{3})?)\\b",
+      "flags": "g",
+      "maskType": "bank"
+    },
+    {
+      "name": "qq_number",
+      "type": "replace",
+      "pattern": "\\b(QQ|qq)\\b(\\s*(?:[:=\\uff1a]\\s*)?)([1-9]\\d{4,11})\\b",
+      "flags": "g",
+      "maskType": "pii",
+      "replaceGroup": 3
+    },
+    {
+      "name": "phone",
+      "type": "phone",
+      "pattern": "\\+?\\d[\\d\\s().-]{6,}\\d",
+      "flags": "g",
+      "maskType": "phone"
+    }
+  ]
+}

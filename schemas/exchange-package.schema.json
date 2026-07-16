@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema-docs.local/schemas/exchange-package.schema.json",
+  "title": "Exchange Package Manifest Schema",
+  "type": "object",
+  "required": [
+    "packageVersion",
+    "packageType",
+    "title",
+    "canonicalDocument",
+    "documentSchema",
+    "createdAt",
+    "includes"
+  ],
+  "properties": {
+    "version": { "type": "number" },
+    "packageVersion": { "type": "string" },
+    "packageType": { "type": "string", "const": "markdown.exchange" },
+    "title": { "type": "string" },
+    "canonicalDocument": {
+      "type": "object",
+      "required": ["path", "hash"],
+      "properties": {
+        "path": { "type": "string" },
+        "hash": { "type": "string" }
+      }
+    },
+    "documentSchema": {
+      "type": "object",
+      "required": ["path", "hash"],
+      "properties": {
+        "path": { "type": "string" },
+        "hash": { "type": "string" }
+      }
+    },
+    "createdAt": { "type": "string" },
+    "includes": {
+      "type": "object",
+      "required": ["document", "evidence", "audit"],
+      "properties": {
+        "document": { "type": "boolean" },
+        "evidence": { "type": "boolean" },
+        "audit": { "type": "boolean" }
+      }
+    }
+  }
+}

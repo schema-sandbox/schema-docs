@@ -1,0 +1,83 @@
+{
+  "releaseTarget": "v0.1.0",
+  "generatedBy": "npm run fixture-smoke",
+  "results": [
+    {
+      "id": "F-001",
+      "status": "pass",
+      "evidence": "synthetic DOCX converted through appService.convertDocument",
+      "notes": ""
+    },
+    {
+      "id": "F-002",
+      "status": "pass",
+      "evidence": "synthetic DOCX heading/list converted through appService.convertDocument",
+      "notes": ""
+    },
+    {
+      "id": "F-003",
+      "status": "pass",
+      "evidence": "Markdown exported to DOCX and re-imported",
+      "notes": ""
+    },
+    {
+      "id": "F-004",
+      "status": "pass",
+      "evidence": "Markdown exported to PDF and text layer re-imported",
+      "notes": ""
+    },
+    {
+      "id": "F-005",
+      "status": "pass",
+      "evidence": "generated DOCX re-imported through DOCX adapter",
+      "notes": ""
+    },
+    {
+      "id": "F-006",
+      "status": "pass",
+      "evidence": "generated PDF text layer extracted through PDF adapter",
+      "notes": ""
+    },
+    {
+      "id": "F-007",
+      "status": "known_limit",
+      "evidence": "synthetic text-layer PDF extracted",
+      "notes": "Uses generated text-layer PDF; external real PDFs still need manual review."
+    },
+    {
+      "id": "F-008",
+      "status": "pass",
+      "evidence": "CSV import, query, Markdown export, and CSV export completed",
+      "notes": ""
+    },
+    {
+      "id": "F-009",
+      "status": "pass",
+      "evidence": "synthetic XLSX first sheet preview completed",
+      "notes": ""
+    },
+    {
+      "id": "F-010",
+      "status": "pass",
+      "evidence": "exchange package exported DOCX/PDF, read-back hash verification passed, and receiver/trust report artifacts were written",
+      "notes": ""
+    },
+    {
+      "id": "F-011",
+      "status": "pass",
+      "evidence": "AI preview detected credential-like text and returned review_required",
+      "notes": ""
+    },
+    {
+      "id": "F-012",
+      "status": "blocked",
+      "evidence": "desktop runtime bridge, diagnostics, native workspace/file picker hooks, visible first-workflow check, and packaged API workflow smoke exist, but no current strict desktop verification record is present yet",
+      "notes": "No previously closed F-012 result is available. Run desktop-verification-fill with explicit visible UI evidence for the current artifact, verify it with desktop-verification-check -- --strict, then run desktop-fixture-close -- --record <filled-record.json> --write so fixture-smoke can preserve the closed F-012 result."
+    }
+  ],
+  "statusCounts": {
+    "pass": 10,
+    "known_limit": 1,
+    "blocked": 1
+  }
+}

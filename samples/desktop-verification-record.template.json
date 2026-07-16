@@ -1,0 +1,73 @@
+{
+  "releaseTarget": "v0.1.0",
+  "recordType": "desktop-verification",
+  "artifact": {
+    "path": "",
+    "kind": "app.exe | msi | nsis",
+    "bytes": 0,
+    "sha256": ""
+  },
+  "environment": {
+    "windowsVersion": "",
+    "webView2Present": "unknown",
+    "nodeVersion": "",
+    "machineProfile": "clean | near-clean | developer"
+  },
+  "startup": {
+    "status": "not_run",
+    "startupTimeMs": 0,
+    "windowTitle": "",
+    "apiBaseUrl": "",
+    "runtimeHealthOk": false,
+    "smartscreenOrAvInterruption": "",
+    "notes": ""
+  },
+  "visibleUi": {
+    "desktopDiagnostics": {
+      "status": "not_run",
+      "nodeAvailable": false,
+      "apiHealthOk": false,
+      "runtimePathsVisible": false,
+      "sessionLogsVisible": false,
+      "notes": ""
+    },
+    "firstWorkflow": {
+      "status": "not_run",
+      "readBackValid": false,
+      "notes": ""
+    },
+    "workspacePicker": {
+      "status": "not_run",
+      "pathFilled": false,
+      "workspaceOpened": false,
+      "notes": ""
+    },
+    "filePicker": {
+      "status": "not_run",
+      "pathFilled": false,
+      "importSucceeded": false,
+      "notes": ""
+    }
+  },
+  "automatedEvidence": {
+    "desktopAppSmokeOk": false,
+    "desktopWorkflowSmokeOk": false,
+    "desktopBridgeSmokeOk": false,
+    "releaseArtifactsRecorded": false,
+    "notes": ""
+  },
+  "sendGate": {
+    "status": "not_run",
+    "ordinaryPreviewDecision": "",
+    "sensitivePreviewDecision": "",
+    "credentialSendBlocked": false,
+    "apiKeyNotPersisted": false,
+    "notes": ""
+  },
+  "result": {
+    "status": "not_run",
+    "tester": "",
+    "testedAt": "",
+    "notes": ""
+  }
+}

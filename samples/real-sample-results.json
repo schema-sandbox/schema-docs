@@ -1,0 +1,308 @@
+{
+  "samples": [
+    {
+      "id": "RS-001",
+      "name": "academic-paper-multi-column.pdf",
+      "type": "pdf",
+      "quality": "medium",
+      "warningsCorrect": true,
+      "aiReady": true,
+      "status": "known_limit",
+      "knownLimitCategory": "layout",
+      "capabilities": [
+        "ai_intake",
+        "safety_gate",
+        "format_exchange"
+      ],
+      "notes": "Multi-column layout is simplified into single column sequence."
+    },
+    {
+      "id": "RS-002",
+      "name": "financial-report-complex-table.docx",
+      "type": "docx",
+      "quality": "high",
+      "warningsCorrect": true,
+      "aiReady": true,
+      "status": "pass",
+      "knownLimitCategory": "none",
+      "capabilities": [
+        "ai_intake",
+        "format_exchange"
+      ],
+      "notes": "Simple headings and paragraph structures are AI-ready after review."
+    },
+    {
+      "id": "RS-003",
+      "name": "legal-agreement-text.pdf",
+      "type": "pdf",
+      "quality": "high",
+      "warningsCorrect": true,
+      "aiReady": true,
+      "status": "pass",
+      "knownLimitCategory": "none",
+      "capabilities": [
+        "ai_intake",
+        "safety_gate",
+        "format_exchange"
+      ],
+      "notes": "Clean digital text layer extracted into readable Markdown."
+    },
+    {
+      "id": "RS-004",
+      "name": "patient-survey-scanned.pdf",
+      "type": "pdf",
+      "quality": "low",
+      "warningsCorrect": true,
+      "aiReady": false,
+      "status": "known_limit",
+      "knownLimitCategory": "ocr",
+      "capabilities": [
+        "safety_gate"
+      ],
+      "notes": "Scanned image PDF triggers correct warning about missing OCR."
+    },
+    {
+      "id": "RS-005",
+      "name": "chinese-employee-list.csv",
+      "type": "csv",
+      "quality": "high",
+      "warningsCorrect": true,
+      "aiReady": true,
+      "status": "pass",
+      "knownLimitCategory": "none",
+      "capabilities": [
+        "ai_intake",
+        "format_exchange",
+        "table_filter"
+      ],
+      "notes": "CJK characters remain readable with type inference."
+    },
+    {
+      "id": "RS-006",
+      "name": "inventory-records.xlsx",
+      "type": "xlsx",
+      "quality": "medium",
+      "warningsCorrect": true,
+      "aiReady": true,
+      "status": "pass",
+      "knownLimitCategory": "none",
+      "capabilities": [
+        "ai_intake",
+        "format_exchange",
+        "table_filter"
+      ],
+      "notes": "First sheet preview loaded with column names."
+    },
+    {
+      "id": "RS-007",
+      "name": "formula-heavy-sheet.xlsx",
+      "type": "xlsx",
+      "quality": "low",
+      "warningsCorrect": true,
+      "aiReady": false,
+      "status": "known_limit",
+      "knownLimitCategory": "formula",
+      "capabilities": [
+        "safety_gate",
+        "format_exchange",
+        "table_filter"
+      ],
+      "notes": "XLSX formulas are not executed; raw values only."
+    },
+    {
+      "id": "RS-008",
+      "name": "large-log-data.csv",
+      "type": "csv",
+      "quality": "high",
+      "warningsCorrect": true,
+      "aiReady": true,
+      "status": "pass",
+      "knownLimitCategory": "none",
+      "capabilities": [
+        "ai_intake",
+        "table_filter",
+        "long_input"
+      ],
+      "notes": "Large row set is narrowed through the standard 500-row preview boundary."
+    },
+    {
+      "id": "RS-009",
+      "name": "round-trip-docx-back-to-md.md",
+      "type": "md",
+      "quality": "high",
+      "warningsCorrect": true,
+      "aiReady": true,
+      "status": "pass",
+      "knownLimitCategory": "none",
+      "capabilities": [
+        "ai_intake",
+        "format_exchange",
+        "external_refresh"
+      ],
+      "notes": "Docx export reads back into Markdown structure."
+    },
+    {
+      "id": "RS-010",
+      "name": "cjk-corrupt-cidfont.pdf",
+      "type": "pdf",
+      "quality": "low",
+      "warningsCorrect": true,
+      "aiReady": false,
+      "status": "known_limit",
+      "knownLimitCategory": "styles",
+      "capabilities": [
+        "safety_gate",
+        "format_exchange"
+      ],
+      "notes": "CIDFont characters with complex encoding trigger CJK warning."
+    },
+    {
+      "id": "RS-011",
+      "name": "scanned-medical-receipt.pdf",
+      "type": "pdf",
+      "quality": "low",
+      "warningsCorrect": true,
+      "aiReady": false,
+      "status": "known_limit",
+      "knownLimitCategory": "ocr",
+      "capabilities": [
+        "safety_gate"
+      ],
+      "notes": "Image-only scan fails text layer detection and prompts for OCR."
+    },
+    {
+      "id": "RS-012",
+      "name": "merged-cells-invoice.xlsx",
+      "type": "xlsx",
+      "quality": "medium",
+      "warningsCorrect": true,
+      "aiReady": true,
+      "status": "known_limit",
+      "knownLimitCategory": "layout",
+      "capabilities": [
+        "ai_intake",
+        "table_filter"
+      ],
+      "notes": "Merged cells in headers are flattened into clean sequential columns."
+    },
+    {
+      "id": "RS-013",
+      "name": "simple-user-guide.docx",
+      "type": "docx",
+      "quality": "high",
+      "warningsCorrect": true,
+      "aiReady": true,
+      "status": "pass",
+      "knownLimitCategory": "none",
+      "capabilities": [
+        "ai_intake",
+        "format_exchange"
+      ],
+      "notes": "Simple headings and list items parsed into readable Markdown."
+    },
+    {
+      "id": "RS-014",
+      "name": "api-spec-broken-links.pdf",
+      "type": "pdf",
+      "quality": "medium",
+      "warningsCorrect": true,
+      "aiReady": true,
+      "status": "pass",
+      "knownLimitCategory": "none",
+      "capabilities": [
+        "ai_intake",
+        "format_exchange"
+      ],
+      "notes": "Static text is readable after review; interactive bookmarks are ignored."
+    },
+    {
+      "id": "RS-015",
+      "name": "large-product-catalog.xlsx",
+      "type": "xlsx",
+      "quality": "high",
+      "warningsCorrect": true,
+      "aiReady": true,
+      "status": "pass",
+      "knownLimitCategory": "none",
+      "capabilities": [
+        "ai_intake",
+        "table_filter",
+        "long_input"
+      ],
+      "notes": "Correctly processes multi-sheet dataset within token limits."
+    },
+    {
+      "id": "RS-016",
+      "name": "marketing-deck-embedded-images.pdf",
+      "type": "pdf",
+      "quality": "low",
+      "warningsCorrect": true,
+      "aiReady": false,
+      "status": "known_limit",
+      "knownLimitCategory": "layout",
+      "capabilities": [
+        "safety_gate",
+        "format_exchange"
+      ],
+      "notes": "Embedded vector diagrams and shapes are omitted from plain-text AI context."
+    },
+    {
+      "id": "RS-017",
+      "name": "complex-payroll-pivot.xlsx",
+      "type": "xlsx",
+      "quality": "medium",
+      "warningsCorrect": true,
+      "aiReady": true,
+      "status": "known_limit",
+      "knownLimitCategory": "layout",
+      "capabilities": [
+        "ai_intake",
+        "table_filter"
+      ],
+      "notes": "Pivot tables and multiple merged sub-headers are flattened."
+    },
+    {
+      "id": "RS-018",
+      "name": "handwritten-feedback-form.pdf",
+      "type": "pdf",
+      "quality": "low",
+      "warningsCorrect": true,
+      "aiReady": false,
+      "status": "known_limit",
+      "knownLimitCategory": "ocr",
+      "capabilities": [
+        "safety_gate"
+      ],
+      "notes": "Low-contrast handwriting has no trusted digital text layer and needs OCR."
+    },
+    {
+      "id": "RS-019",
+      "name": "technical-spec-images.docx",
+      "type": "docx",
+      "quality": "medium",
+      "warningsCorrect": true,
+      "aiReady": true,
+      "status": "known_limit",
+      "knownLimitCategory": "layout",
+      "capabilities": [
+        "ai_intake",
+        "format_exchange"
+      ],
+      "notes": "Text content is readable after review; embedded raster illustrations are ignored."
+    },
+    {
+      "id": "RS-020",
+      "name": "credentials-leak-blocked.txt",
+      "type": "txt",
+      "quality": "high",
+      "warningsCorrect": true,
+      "aiReady": false,
+      "status": "blocked",
+      "knownLimitCategory": "security",
+      "capabilities": [
+        "safety_gate"
+      ],
+      "notes": "Contains plain-text API key or credential that is blocked at Send Gate."
+    }
+  ]
+}

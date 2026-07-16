@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema-docs.local/schemas/quality-report.schema.json",
+  "title": "Quality Report Schema",
+  "type": "object",
+  "required": [
+    "id",
+    "recordId",
+    "inputType",
+    "textLayerDetected",
+    "scannedLikely",
+    "tableSimplified",
+    "possibleMojibake",
+    "confidence",
+    "matchedKnownLimits",
+    "suggestedActions",
+    "whetherAiSendGateBlocked",
+    "recommendedNextStep"
+  ],
+  "properties": {
+    "id": { "type": "string" },
+    "recordId": { "type": "string" },
+    "inputType": { "type": "string" },
+    "textLayerDetected": { "type": "boolean" },
+    "scannedLikely": { "type": "boolean" },
+    "tableSimplified": { "type": "boolean" },
+    "possibleMojibake": { "type": "boolean" },
+    "confidence": { "type": "string", "enum": ["high", "medium", "low"] },
+    "matchedKnownLimits": { "type": "array", "items": { "type": "string" } },
+    "suggestedActions": { "type": "array", "items": { "type": "string" } },
+    "whetherAiSendGateBlocked": { "type": "boolean" },
+    "whetherUserCanOverride": { "type": "boolean" },
+    "recommendedNextStep": { "type": "string" }
+  }
+}

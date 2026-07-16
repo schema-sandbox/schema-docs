@@ -1,0 +1,130 @@
+{
+  "releaseTarget": "v0.1.0",
+  "policy": {
+    "allowSensitiveFiles": false,
+    "minimumWorkflowCount": 10,
+    "requiredCoverage": ["docx", "pdf", "md", "csv", "xlsx", "api", "desktop"]
+  },
+  "workflows": [
+    {
+      "id": "F-001",
+      "coverage": ["docx", "md"],
+      "input": "synthetic/simple-paragraphs.docx",
+      "workflow": "DOCX -> Markdown extraction",
+      "path": "CLI/API",
+      "expected": "paragraph text appears in Markdown",
+      "status": "planned",
+      "notes": "synthetic file is acceptable"
+    },
+    {
+      "id": "F-002",
+      "coverage": ["docx", "md"],
+      "input": "synthetic/headings-bullets.docx",
+      "workflow": "DOCX headings and bullets -> Markdown extraction",
+      "path": "CLI/API",
+      "expected": "headings and list items are visible",
+      "status": "planned",
+      "notes": "layout fidelity is not claimed"
+    },
+    {
+      "id": "F-003",
+      "coverage": ["md", "docx"],
+      "input": "synthetic/structured.md",
+      "workflow": "Markdown -> DOCX export",
+      "path": "CLI/API/SDK",
+      "expected": "DOCX file is generated and can be re-imported",
+      "status": "planned",
+      "notes": "round-trip text is the minimum bar"
+    },
+    {
+      "id": "F-004",
+      "coverage": ["md", "pdf"],
+      "input": "synthetic/structured.md",
+      "workflow": "Markdown -> PDF export",
+      "path": "CLI/API/SDK",
+      "expected": "PDF file is generated with extractable text",
+      "status": "planned",
+      "notes": "visual pagination is not the v0.1.0 gate"
+    },
+    {
+      "id": "F-005",
+      "coverage": ["docx", "md"],
+      "input": "generated/exported.docx",
+      "workflow": "Generated DOCX -> Markdown re-import",
+      "path": "CLI",
+      "expected": "exported text survives re-import",
+      "status": "planned",
+      "notes": "guards basic Word/Markdown interchange"
+    },
+    {
+      "id": "F-006",
+      "coverage": ["pdf", "md"],
+      "input": "generated/exported.pdf",
+      "workflow": "Generated PDF -> Markdown text extraction",
+      "path": "CLI",
+      "expected": "text-layer content is extracted",
+      "status": "planned",
+      "notes": "scanned PDF is explicitly out of scope"
+    },
+    {
+      "id": "F-007",
+      "coverage": ["pdf", "md"],
+      "input": "synthetic/text-layer.pdf",
+      "workflow": "Existing text-layer PDF -> Markdown extraction",
+      "path": "CLI/API",
+      "expected": "simple text-layer content is readable",
+      "status": "planned",
+      "notes": "records parser limitations"
+    },
+    {
+      "id": "F-008",
+      "coverage": ["csv", "md", "api"],
+      "input": "synthetic/table.csv",
+      "workflow": "CSV import -> preview -> query export",
+      "path": "CLI/API/SDK",
+      "expected": "query result exports to Markdown and CSV",
+      "status": "planned",
+      "notes": "keeps table exchange path checked"
+    },
+    {
+      "id": "F-009",
+      "coverage": ["xlsx", "api"],
+      "input": "synthetic/first-sheet.xlsx",
+      "workflow": "XLSX first sheet -> table preview",
+      "path": "CLI/API",
+      "expected": "first sheet rows and columns are previewed",
+      "status": "planned",
+      "notes": "multi-sheet fidelity is not claimed"
+    },
+    {
+      "id": "F-010",
+      "coverage": ["md", "docx", "pdf", "api"],
+      "input": "synthetic/exchange-package.md",
+      "workflow": "Markdown exchange package -> exports -> read-back verification -> receiver/trust report",
+      "path": "CLI/API/SDK",
+      "expected": "package hashes verify, exports exist, and receiver-report.md/trust-report.json are written",
+      "status": "planned",
+      "notes": "core document exchange workflow"
+    },
+    {
+      "id": "F-011",
+      "coverage": ["api"],
+      "input": "synthetic/send-gate-sensitive.md",
+      "workflow": "AI preview with sensitive text -> Send Gate",
+      "path": "API/UI",
+      "expected": "warn or review_required decision is visible before send",
+      "status": "planned",
+      "notes": "confirmed send must not bypass review_required"
+    },
+    {
+      "id": "F-012",
+      "coverage": ["desktop", "docx", "pdf", "md"],
+      "input": "synthetic/desktop-smoke.md",
+      "workflow": "Desktop workspace -> native file selection/import -> export -> package read-back",
+      "path": "Desktop",
+      "expected": "same workspace checks and exchange workflow as CLI/API",
+      "status": "planned",
+      "notes": "required before first Windows test build; native file picker and Node-present runtime bridge exist, but current bridge requires system Node unless a bundled sidecar is added"
+    }
+  ]
+}

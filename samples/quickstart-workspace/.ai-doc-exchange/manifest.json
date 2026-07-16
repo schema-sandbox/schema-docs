@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "workspaceId": "ws_quickstart_template",
+  "createdAt": "2026-07-01T12:00:00.000Z",
+  "updatedAt": "2026-07-02T18:32:27.096Z",
+  "documents": [],
+  "datasets": [
+    {
+      "id": "dataset_bbdbe24fc0da4ff3",
+      "sourcePath": "imports/sample-table.csv",
+      "sourceType": "csv",
+      "name": "sample-table",
+      "sheets": [],
+      "duckdbTableNames": [],
+      "status": "imported",
+      "createdAt": "2026-07-02T18:32:27.093Z",
+      "updatedAt": "2026-07-02T18:32:27.093Z"
+    }
+  ],
+  "jobs": [],
+  "apiProfiles": [
+    {
+      "id": "profile_default",
+      "name": "default-local-mock",
+      "apiBaseUrl": "http://127.0.0.1:4177",
+      "model": "gpt-4o"
+    }
+  ],
+  "exchangeAudits": [],
+  "conversionAudits": [],
+  "evidenceRecords": [],
+  "settings": {
+    "defaultAiModel": "gpt-4o",
+    "defaultQueryLimit": 500
+  }
+}

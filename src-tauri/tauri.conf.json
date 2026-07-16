@@ -1,0 +1,46 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "schema-docs",
+  "version": "0.1.0",
+  "identifier": "com.schemadocs.desktop",
+  "build": {
+    "frontendDist": "../public",
+    "devUrl": "http://127.0.0.1:4177",
+    "beforeDevCommand": "npm run serve",
+    "beforeBuildCommand": "node scripts/prepare-release.js"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Schema Docs",
+        "width": 800,
+        "height": 600,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:*; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; font-src 'self' data:; media-src 'self' data: blob:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "resources": {
+      "../src": "runtime/src",
+      "../public": "runtime/public",
+      "../package.json": "runtime/package.json",
+      "resources/node.exe": "runtime/node.exe"
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "android": {
+      "debugApplicationIdSuffix": ".debug"
+    }
+  }
+}

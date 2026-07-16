@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema-docs.local/schemas/feedback-bundle.schema.json",
+  "title": "Feedback Bundle Summary Schema",
+  "type": "object",
+  "required": [
+    "generatedAt",
+    "appVersion",
+    "systemInfo",
+    "settings",
+    "documents",
+    "datasets",
+    "timeline"
+  ],
+  "properties": {
+    "generatedAt": { "type": "string" },
+    "appVersion": { "type": "string" },
+    "redacted": { "type": "boolean" },
+    "systemInfo": {
+      "type": "object",
+      "required": ["platform", "arch", "nodeVersion"],
+      "properties": {
+        "platform": { "type": "string" },
+        "arch": { "type": "string" },
+        "nodeVersion": { "type": "string" }
+      }
+    },
+    "settings": { "type": "object" },
+    "documents": { "type": "array" },
+    "datasets": { "type": "array" },
+    "timeline": { "type": "array" }
+  }
+}

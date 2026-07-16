@@ -1,0 +1,178 @@
+/* Keep the first-release document workflow visible and disclose specialist tools on demand. */
+body[data-advanced-tools="false"] .shell { max-width: 1100px; padding: 24px 24px 56px; }
+body[data-advanced-tools="false"] .topbar { align-items: flex-start; margin-bottom: 20px; padding: 0 120px 14px 0; }
+body[data-advanced-tools="false"] .topbar h1 { font-size: 26px; }
+body[data-advanced-tools="false"] .hero-tagline { max-width: 640px; line-height: 1.5; }
+
+body[data-advanced-tools="false"] #refreshManifest,
+body[data-advanced-tools="false"] #openRedactionTool,
+body[data-advanced-tools="false"] #importExcelButton,
+body #quickImportExcel,
+body[data-advanced-tools="false"] .ai-summon-key,
+body[data-advanced-tools="false"] #markdownPrepareForAi,
+body[data-advanced-tools="false"] #openMarkdownRedactionTool { display: none !important; }
+
+body[data-advanced-tools="false"] .document-flow-panel,
+body[data-advanced-tools="false"] .markdown-workbench {
+  overflow: visible;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+body[data-advanced-tools="false"] .document-flow-panel:hover,
+body[data-advanced-tools="false"] .markdown-workbench:hover { border-color: transparent; box-shadow: none; }
+
+body[data-advanced-tools="false"] .document-flow-panel .panel-heading-row,
+body[data-advanced-tools="false"] .markdown-workbench > .panel-heading-row {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+body[data-advanced-tools="false"] .drop-zone {
+  min-height: 220px;
+  border-style: solid;
+  background: var(--bg-card);
+}
+
+.first-release-entry-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 0 14px;
+}
+.first-release-entry-actions #openMarkdownFile {
+  min-width: 180px;
+  min-height: 42px;
+}
+
+body[data-advanced-tools="false"] .markdown-command-bar { grid-template-columns: 1fr; margin: 16px 0 10px; }
+body[data-advanced-tools="false"] .markdown-import-row { grid-column: 1 / -1; gap: 10px; }
+body[data-advanced-tools="false"] .markdown-import-row button {
+  flex: 0 1 auto;
+  min-height: 40px;
+  padding: 9px 14px;
+  font-size: 13px;
+}
+
+body[data-advanced-tools="false"] #markdownImportFile {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #07110e;
+}
+
+body[data-advanced-tools="false"] .markdown-workbench .markdown-search-row,
+body[data-advanced-tools="false"] .markdown-workbench .markdown-path-row,
+body[data-advanced-tools="false"] .markdown-workbench .markdown-format-toolbar,
+body[data-advanced-tools="false"] .markdown-workbench .markdown-local-search-row,
+body[data-advanced-tools="false"] .markdown-workbench .subsection:has(#versionList),
+body[data-advanced-tools="false"] #deleteNote,
+body[data-advanced-tools="false"] #reloadReadView,
+body[data-advanced-tools="false"] #toggleEditorType { display: none !important; }
+
+.manual-path-box {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+.first-release-picker-row {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.first-release-picker-row button { width: 100%; }
+.first-release-selected-row {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+.first-release-selected-row input[readonly] {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.first-release-details {
+  margin-top: 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--bg-card);
+}
+.first-release-details > summary {
+  display: flex;
+  align-items: center;
+  min-height: 58px;
+  padding: 12px 16px;
+  cursor: pointer;
+  list-style: none;
+}
+.first-release-details > summary::-webkit-details-marker { display: none; }
+.first-release-details > summary::after {
+  content: "+";
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 20px;
+}
+.first-release-details[open] > summary::after { content: "−"; }
+.first-release-details > summary span { display: grid; gap: 3px; }
+.first-release-details > summary small { color: var(--text-muted); font-size: 12px; }
+.first-release-details > :not(summary) { margin: 0 16px 16px; }
+.document-history { margin-top: 18px; }
+.document-history .subsection { padding-top: 0; border-top: 0; }
+
+.developer-workbench { grid-column: 1 / -1; }
+.developer-workbench > header { padding-bottom: 12px; border-bottom: 1px solid var(--border-subtle); }
+.developer-workbench > header p { margin: 5px 0 0; color: var(--text-muted); }
+.developer-workbench .panel,
+.developer-workbench article {
+  width: auto;
+  margin: 0 16px 16px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+body[data-advanced-tools="false"] #developerWorkbench { display: none !important; }
+body[data-advanced-tools="true"] #developerWorkbench { display: block; }
+body[data-active-view="editor"] #developerWorkbench { display: none !important; }
+body[data-active-view="editor"] #btnBackToHome { display: inline-flex !important; }
+
+@media (max-width: 720px) {
+  .first-release-picker-row,
+  .first-release-selected-row { grid-template-columns: 1fr; }
+  .first-release-entry-actions,
+  .first-release-entry-actions #openMarkdownFile { width: 100%; }
+}
+
+body[data-advanced-tools="false"] .markdown-status-bar { margin-top: 14px; padding-top: 14px; }
+body[data-advanced-tools="false"] .markdown-save-row { gap: 8px; }
+body[data-advanced-tools="false"] .markdown-save-row button {
+  min-height: 38px;
+  padding: 8px 13px;
+  font-size: 12px;
+}
+
+body[data-advanced-tools="false"] .markdown-workbench .subsection { margin-top: 18px; padding-top: 18px; }
+
+.capability-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 7px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--text-muted);
+  cursor: default;
+  user-select: text;
+}
+
+@media (max-width: 720px) {
+  body[data-advanced-tools="false"] .shell { padding: 18px 14px 40px; }
+  body[data-advanced-tools="false"] .topbar { display: grid; gap: 14px; padding: 52px 0 12px; }
+  body[data-advanced-tools="false"] .topbar-actions { justify-content: flex-start; }
+  body[data-advanced-tools="false"] .markdown-import-row { display: grid; grid-template-columns: 1fr; }
+  body[data-advanced-tools="false"] .markdown-import-row button { width: 100%; }
+}

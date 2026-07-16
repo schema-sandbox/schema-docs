@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema-docs.local/schemas/ai-send-gate.schema.json",
+  "title": "AI Send Gate Schema",
+  "type": "object",
+  "required": [
+    "decision",
+    "reasons",
+    "requiredActions",
+    "optionalActions",
+    "overrideAllowed",
+    "overrideReasonRequired",
+    "qualityScore",
+    "knownLimitIds"
+  ],
+  "properties": {
+    "decision": { "type": "string", "enum": ["allow", "review_required", "block"] },
+    "reasons": { "type": "array", "items": { "type": "string" } },
+    "requiredActions": { "type": "array", "items": { "type": "string" } },
+    "optionalActions": { "type": "array", "items": { "type": "string" } },
+    "overrideAllowed": { "type": "boolean" },
+    "overrideReasonRequired": { "type": "boolean" },
+    "qualityScore": { "type": "number" },
+    "knownLimitIds": { "type": "array", "items": { "type": "string" } }
+  }
+}

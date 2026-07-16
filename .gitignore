@@ -1,0 +1,67 @@
+node_modules/
+__pycache__/
+*.pyc
+dist/
+.vite/
+target/
+coverage/
+.nyc_output/
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Desktop resources generated during release packaging
+/src-tauri/resources/node.exe
+
+# Local runtime state
+/.local-file-tool/
+/.ai-doc-exchange/
+/.desktop-runtime/
+/imports/
+/notes/
+/outputs/
+/list/
+
+# Generated feedback and handoff artifacts
+/artifacts/feedback-bundles/
+/samples/desktop-preflight-current/
+/samples/*-package.json
+/samples/release-artifact-index.json
+/docs/*-package.md
+/docs/release-artifact-index.md
+/public-preview/
+/src-tauri/gen/schemas/
+
+# Windows installers are uploaded as GitHub Release assets, not committed to source history
+/release/windows/*.exe
+/release/windows/*.msi
+/release/windows/*.zip
+
+# Local smoke/test workspaces
+/tmp-*/
+/tmp-*.txt
+/--json/
+/demo-office-workspace/
+/test-office-*/
+/customer-fresh-test/
+/customer-test-workspace/
+/customer-v2-workspace/
+/retest-v*/
+/test-workspace-v*/
+/scratch/
+/tmp/
+
+# Local review reports and oversized manual fixtures are not public source files
+/github_readiness_report.md
+/self_test_report.md
+/test-fixtures/manual-smoke/long.md
+
+# Internal strategy and roadmap documents (not for public release)
+/file_exchange_solution_strategy.md
+/technical_roadmap.md
+/VERSION-ROADMAP.md

@@ -1,0 +1,31 @@
+import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+export const execFileAsync = promisify(execFile);
+export const projectRoot = path.resolve(import.meta.dirname, "..", "..");
+
+export const cliPath = path.join(projectRoot, "src", "cli", "index.js");
+export const cleanupArtifactsPath = path.join(projectRoot, "src", "cli", "cleanup-artifacts.js");
+export const fixtureCheckPath = path.join(projectRoot, "src", "cli", "fixture-check.js");
+export const fixtureSmokePath = path.join(projectRoot, "src", "cli", "fixture-smoke.js");
+export const uiCheckPath = path.join(projectRoot, "src", "cli", "ui-check.js");
+export const languageBoundaryCheckPath = path.join(projectRoot, "src", "cli", "language-boundary-check.js");
+export const webUiSmokePath = path.join(projectRoot, "src", "cli", "web-ui-smoke.js");
+export const releaseReadinessPath = path.join(projectRoot, "src", "cli", "release-readiness.js");
+export const releaseArtifactsPath = path.join(projectRoot, "src", "cli", "release-artifacts.js");
+export const releaseArtifactsIndexPath = path.join(projectRoot, "src", "cli", "release-artifacts-index.js");
+export const rcCheckPath = path.join(projectRoot, "src", "cli", "rc-check.js");
+export const betaCheckPath = path.join(projectRoot, "src", "cli", "beta-check.js");
+export const privateBetaPackagePath = path.join(projectRoot, "src", "cli", "private-beta-package.js");
+export const desktopVerificationCheckPath = path.join(projectRoot, "src", "cli", "desktop-verification-check.js");
+export const desktopVerificationRecordPath = path.join(projectRoot, "src", "cli", "desktop-verification-record.js");
+export const desktopVerificationFillPath = path.join(projectRoot, "src", "cli", "desktop-verification-fill.js");
+export const desktopReleasePreflightPath = path.join(projectRoot, "src", "cli", "desktop-release-preflight.js");
+export const desktopPreflightCheckPath = path.join(projectRoot, "src", "cli", "desktop-preflight-check.js");
+export const desktopFixtureClosePath = path.join(projectRoot, "src", "cli", "desktop-fixture-close.js");
+export const desktopPreviewPath = path.join(projectRoot, "src", "cli", "desktop-preview.js");
+export const desktopAppSmokePath = path.join(projectRoot, "src", "cli", "desktop-app-smoke.js");
+export const desktopWorkflowSmokePath = path.join(projectRoot, "src", "cli", "desktop-workflow-smoke.js");
+export const desktopBridgeSmokePath = path.join(projectRoot, "src", "cli", "desktop-bridge-smoke.js");
+export const desktopRuntimeLauncherPath = path.join(projectRoot, "src", "cli", "desktop-runtime-launcher.js");
