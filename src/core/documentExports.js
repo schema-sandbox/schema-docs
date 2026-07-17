@@ -1,5 +1,5 @@
 import path from "node:path";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { readMarkdown } from "./markdown.js";
 import { assertSafeWritePath } from "./pathGuard.js";
@@ -57,13 +57,14 @@ function shouldStripProcessMetadataForPath(markdownRelativePath) {
 const normalized = String(markdownRelativePath || "").replace(/\\/g, "/").replace(/^\/+/, "");
 return normalized === "outputs" || normalized.startsWith("outputs/");
 }
-export async function exportMarkdownDocument(workspacePath, markdownRelativePath, outputRelativePath, format) {
+export async function exportMarkdownDocument(workspacePath, markdownRelativePath, outputRelativePath, format, options = {}) {
 const normalizedFormat = normalizeDocumentFormat(format);
 const markdown = await readMarkdown(workspacePath, markdownRelativePath);
 const outputPath = await writeRenderedDocument(workspacePath, markdown, outputRelativePath, normalizedFormat, {
 stripProcessMetadata: shouldStripProcessMetadataForPath(markdownRelativePath),
 baseDir: path.dirname(path.resolve(workspacePath, markdownRelativePath)),
-assetRoot: workspacePath
+assetRoot: workspacePath,
+avoidOverwrite: options.avoidOverwrite
 });
 const buffer = await readFile(outputPath);
 const hash = createHash("sha256").update(buffer).digest("hex");
@@ -82,6 +83,7 @@ let safePath = outputPath;
 if (!isAbs) {
 safePath = await assertSafeWritePath(outputPath, workspacePath, [`.${normalizedFormat}`]);
 }
+if (options.avoidOverwrite) safePath = await availableOutputPath(safePath);
 const exportMarkdown = projectPptxSlidesForExport(markdown);
 const portableMarkdown = normalizedFormat === "md"
 ? await portableMarkdownAssets(exportMarkdown, options.baseDir, options.assetRoot, safePath)
@@ -89,6 +91,14 @@ const portableMarkdown = normalizedFormat === "md"
 const renderedBuffer = await renderMarkdown(portableMarkdown, normalizedFormat, options);
 await writeFile(safePath, renderedBuffer);
 return safePath;
+}
+async function availableOutputPath(filePath) {
+const { dir, name, ext } = path.parse(filePath);
+let candidate = filePath;
+for (let index = 2; ; index++) {
+try { await access(candidate); } catch (error) { if (error.code === "ENOENT") return candidate; throw error; }
+candidate = path.join(dir, `${name} (${index})${ext}`);
+}
 }
 export async function readMarkdownFile(filePath) {
 return readFile(filePath, "utf8");

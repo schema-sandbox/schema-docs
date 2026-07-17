@@ -136,8 +136,25 @@ function showExtractionPaths(record, readablePath) {
   `AI-ready Markdown: ${aiReadyPath || "not available"}`
  ].join("\n"));
 }
-function setExtractionProgress(active, text = "Extracting to Markdown. Large PDFs take a while; keep window open.") {
- const panel = $("extractionProgress"), label = $("extractionProgressText"); if (!panel) return; panel.classList.toggle("hidden", !active); panel.dataset.active = active ? "true" : "false"; if (label) label.textContent = text;
+function ensureGlobalTaskProgress() {
+ let banner = $("schemaLongTaskProgress");
+ if (banner) return banner;
+ banner = document.body.appendChild(document.createElement("div"));
+ Object.assign(banner, { id: "schemaLongTaskProgress", className: "long-task hidden", innerHTML: '<div><b></b><br><span></span></div><button title="Dismiss">×</button>' });
+ banner.lastChild.onclick = () => banner.classList.add("hidden");
+ return banner;
+}
+function setGlobalTaskProgress(active, text, state = "working") {
+ const b = ensureGlobalTaskProgress(); b.dataset.state = state; b.classList.toggle("hidden", !active);
+ b.querySelector("b").textContent = state === "error" ? "Document import failed" : "Document import in progress";
+ b.querySelector("span").textContent = text || "Large documents can take several minutes. Keep this window open.";
+}
+window.schemaDocsSetLongTaskProgress = setGlobalTaskProgress;
+function setExtractionProgress(active, text = "Extracting to Markdown. Large PDFs take a while; keep window open.", state = "working") {
+ const panel = $("extractionProgress"), label = $("extractionProgressText");
+ if (panel) { panel.classList.toggle("hidden", !active); panel.dataset.active = active; panel.dataset.state = state; }
+ if (label) label.textContent = text;
+ setGlobalTaskProgress(active, text, state);
 }
 function clickRun(id, action) {
  $(id).addEventListener("click", () => run(action));
@@ -592,6 +609,7 @@ async function discoverLocalApiConfig() {
  }
  return false;
 }
+window.schemaDocsRefreshLocalApiConfig = discoverLocalApiConfig;
 async function ensureLocalApiConfig() {
  if (window.AI_DOC_EXCHANGE_TOKEN) {
   return;
@@ -1079,13 +1097,14 @@ function warnIfSavingOrExportingCurrentSegment(actionLabel) {
  const message = `${actionLabel} will use only the currently loaded segment: part ${info.index + 1} of ${info.total}.\n\nFor the full document, use the "Merge and export all parts" buttons in the segment banner. Continue with the current segment?`;
  return confirm(message);
 }
-async function chooseNativeSavePath({ inputId, defaultPath, filterName, extensions }) {
+async function chooseNativeSavePath({ inputId, defaultPath, filterName, extensions, autoRename = false }) {
  const currentValue = defaultSaveDialogPath(defaultPath || $(inputId)?.value || "");
  try {
   const selected = await tauriInvoke("select_save_file_path", {
    defaultPath: currentValue,
    filterName,
-   extensions
+   extensions,
+   autoRename
   });
   if (selected && inputId && $(inputId)) {
    $(inputId).value = selected;
@@ -1510,7 +1529,8 @@ async function exportMergedNote(format) {
    inputId: outputId,
    defaultPath: exportVal,
    filterName: `${label} Document`,
-   extensions: [extension]
+   extensions: [extension],
+   autoRename: true
   });
   if (!selectedOutput) return { cancelled: true };
   const finalExportPath = $(outputId)?.value.trim() || selectedOutput;
@@ -1568,7 +1588,8 @@ async function exportMergedNote(format) {
    result = await api("/api/markdown/export", {
     relativePath: tempMdPath,
     outputRelativePath: finalExportPath,
-    format
+    format,
+    avoidOverwrite: true
    });
   } finally {
    try {
@@ -1612,7 +1633,8 @@ async function exportMergedNote(format) {
   throw err;
  }
 }
-window.exportMergedNote = exportMergedNote;
+let mergedExportQueue = Promise.resolve();
+window.exportMergedNote = format => mergedExportQueue = mergedExportQueue.catch(() => {}).then(() => exportMergedNote(format));
 function stripGeneratedSegmentMetadata(content) {
  const value = String(content ?? "");
  return value
@@ -1926,6 +1948,7 @@ const importUploadPanel = createImportUploadPanel({
  refreshManifest,
  refreshInbox,
  print,
+ setImportProgress: setExtractionProgress,
  onImportedRecord: selectAndPrepareImportedRecord
 });
 importUploadPanel.bindImportUpload();

@@ -82,12 +82,27 @@ test("Markdown workbench blocks remote image fetches and file URLs in reading vi
   assert.doesNotMatch(html, /href="file:/);
 });
 test("Markdown workbench resolves angle-bracket local image paths through the protected workspace endpoint", () => {
+  global.window = { AI_DOC_EXCHANGE_TOKEN: "token-123" };
   const renderer = createRenderer({ workspacePath: "D:\\workspace" });
   const html = renderer.markdownToReadableHtml("![Formula](<../assets/GEO&GTO1.pptx/formula 1.png>)");
   assert.match(html, /api\/workspace-asset/);
+  assert.match(html, /class="workspace-asset-image"/);
   assert.match(html, /loading="lazy"/);
+  assert.match(html, /markdownPath=outputs%2Freadable%2Fnote\.md/);
   assert.match(html, /assetPath=\.\.%2Fassets%2FGEO%26GTO1\.pptx%2Fformula\+1\.png/);
+  assert.match(html, /token=token-123/);
+  assert.match(html, /data-asset-path="\.\.\/assets\/GEO&amp;GTO1\.pptx\/formula 1\.png"/);
   assert.doesNotMatch(html, /GEO%26amp%3B/);
+  delete global.window;
+});
+
+test("PDF fallback formulas are marked for document-like visual blending", () => {
+  global.window = { AI_DOC_EXCHANGE_TOKEN: "token-123" };
+  const html = createRenderer({ workspacePath: "D:\\workspace" }).markdownToReadableHtml(
+    "![Formula preserved from PDF page 1](<../assets/paper.pdf/page-000001-formula-001.png>)"
+  );
+  assert.match(html, /class="workspace-asset-image pdf-formula-image"/);
+  delete global.window;
 });
 test("Markdown workbench recognizes PPTX slide documents for dual-layer reading", () => {
   const renderer = createRenderer();
@@ -159,6 +174,12 @@ test("Markdown reading view binds its inline editor to a single click", async ()
   assert.match(source, /\$\("markdownReadView"\)\?\.addEventListener\("click", \(event\) => \{/);
   assert.match(source, /beginInlineReadEdit\(el, event\);/);
   assert.doesNotMatch(source, /\$\("markdownReadView"\)\?\.addEventListener\("dblclick"/);
+});
+test("merged exports share a sequential queue and request non-overwriting output", async () => {
+  const source = await readFile(path.join(projectRoot, "public", "app.js"), "utf8");
+  assert.match(source, /mergedExportQueue\.catch\(\(\) => \{\}\)\.then\(\(\) => exportMergedNote\(format\)\)/);
+  assert.match(source, /autoRename: true/);
+  assert.match(source, /avoidOverwrite: true/);
 });
 test("Markdown inline rendering keeps more than one hundred formulas and code spans in order", () => {
   const renderer = createRenderer();

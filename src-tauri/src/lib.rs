@@ -167,6 +167,7 @@ fn select_save_file_path(
     default_path: String,
     filter_name: String,
     extensions: Vec<String>,
+    auto_rename: Option<bool>,
 ) -> Result<Option<String>, String> {
     if !cfg!(windows) {
         return Err(
@@ -196,6 +197,11 @@ fn select_save_file_path(
         .first()
         .map(|extension| extension.trim().trim_start_matches('.').replace('\'', "''"))
         .unwrap_or_default();
+    let overwrite_prompt = if auto_rename.unwrap_or(false) {
+        "$false"
+    } else {
+        "$true"
+    };
 
     let script = format!(
         r#"
@@ -206,7 +212,7 @@ $dialog.Title = 'Choose where to save'
 $dialog.Filter = '{escaped_filter}'
 $dialog.FileName = '{escaped_default}'
 $dialog.DefaultExt = '{default_extension}'
-$dialog.OverwritePrompt = $true
+$dialog.OverwritePrompt = {overwrite_prompt}
 if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {{
   [Console]::Out.Write($dialog.FileName)
 }}
@@ -238,7 +244,27 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {{
     if selected.is_empty() {
         Ok(None)
     } else {
-        Ok(Some(selected))
+        let path = PathBuf::from(selected);
+        if !auto_rename.unwrap_or(false) || !path.exists() {
+            return Ok(Some(path.to_string_lossy().to_string()));
+        }
+        let parent = path.parent().unwrap_or_else(|| std::path::Path::new(""));
+        let stem = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("export");
+        let extension = path.extension().and_then(|value| value.to_str());
+        for index in 2.. {
+            let file_name = match extension {
+                Some(value) => format!("{stem} ({index}).{value}"),
+                None => format!("{stem} ({index})"),
+            };
+            let candidate = parent.join(file_name);
+            if !candidate.exists() {
+                return Ok(Some(candidate.to_string_lossy().to_string()));
+            }
+        }
+        unreachable!()
     }
 }
 

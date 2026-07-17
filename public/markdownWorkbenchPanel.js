@@ -39,6 +39,16 @@ return escapeHtml(url);
 }
 return "#";
 }
+function workspaceAssetUrl(markdownPath, assetPath) {
+ const params = new URLSearchParams({
+  workspacePath: state.workspacePath || "",
+  markdownPath: markdownPath || "",
+  assetPath: assetPath || "",
+  token: globalThis.window?.AI_DOC_EXCHANGE_TOKEN || ""
+ });
+ const apiBase = typeof localApiBaseUrl === "function" ? localApiBaseUrl() : "http://127.0.0.1:4177";
+ return `${apiBase}/api/workspace-asset?${params}`;
+}
 function renderMarkdownImage(alt, url) {
  const readableAlt = String(alt ?? "").replace(/\\([\[\]\\])/g, "$1");
  const target = String(url ?? "").trim()
@@ -48,20 +58,35 @@ function renderMarkdownImage(alt, url) {
   .replace(/&lt;/g, "<")
   .replace(/&gt;/g, ">");
  if (!/^(?:https?:|data:|#)/i.test(target) && state.workspacePath) {
-  const params = new URLSearchParams({
-   workspacePath: state.workspacePath,
-   markdownPath: $("notePath")?.value?.trim() || "",
-   assetPath: target,
-   token: globalThis.window?.AI_DOC_EXCHANGE_TOKEN || ""
-  });
-  const apiBase = typeof localApiBaseUrl === "function" ? localApiBaseUrl() : "http://127.0.0.1:4177";
-  return `<img loading="lazy" src="${escapeHtml(`${apiBase}/api/workspace-asset?${params}`)}" alt="${escapeHtml(readableAlt)}">`;
+  const markdownPath = $("notePath")?.value?.trim() || "";
+  const formulaClass = /Formula preserved from PDF/i.test(readableAlt) || /-formula-\d/i.test(target) ? " pdf-formula-image" : "";
+  return `<img loading="lazy" class="workspace-asset-image${formulaClass}" src="${escapeHtml(workspaceAssetUrl(markdownPath, target))}" alt="${escapeHtml(readableAlt)}" data-markdown-path="${escapeHtml(markdownPath)}" data-asset-path="${escapeHtml(target)}">`;
  }
  const apiBase = typeof localApiBaseUrl === "function" ? localApiBaseUrl() : "";
  if (/^https?:/i.test(target) && (!apiBase || !target.startsWith(apiBase))) {
   return `<span class="markdown-image-blocked" title="External images are blocked for privacy">Image not loaded: ${escapeHtml(readableAlt || target)}</span>`;
  }
  return `<img src="${safeMarkdownUrl(target)}" alt="${escapeHtml(readableAlt)}">`;
+}
+async function retryWorkspaceAssetImage(image) {
+ if (!image || image.dataset.assetRetried === "true") return;
+ image.dataset.assetRetried = "true";
+ const refresh = globalThis.window?.schemaDocsRefreshLocalApiConfig;
+ if (typeof refresh === "function") {
+  try {
+   await refresh();
+  } catch {}
+ }
+ const markdownPath = image.dataset.markdownPath || $("notePath")?.value?.trim() || "";
+ const assetPath = image.dataset.assetPath || "";
+ if (!state.workspacePath || !markdownPath || !assetPath || !globalThis.window?.AI_DOC_EXCHANGE_TOKEN) {
+  image.replaceWith(Object.assign(document.createElement("span"), {
+   className: "markdown-image-blocked",
+   textContent: `Image unavailable: ${image.alt || assetPath || "local asset"}`
+  }));
+  return;
+ }
+ image.src = workspaceAssetUrl(markdownPath, assetPath);
 }
 function stripAiCitationArtifacts(value) {
 return String(value ?? "").replace(/[\u25a0-\u25a1\u25aa-\u25ab\u25cc-\u25cf\u25fb-\u25ff\uE000-\uF8FF]*cite(?:[\u25a0-\u25a1\u25aa-\u25ab\u25cc-\u25cf\u25fb-\u25ff\uE000-\uF8FF]*turn\d+[A-Za-z]+\d+)+[\u25a0-\u25a1\u25aa-\u25ab\u25cc-\u25cf\u25fb-\u25ff\uE000-\uF8FF]*/gi, "");
@@ -685,6 +710,11 @@ if (/^```/.test(trimmed)) {
    return `<span class="masked-pill" data-original="${escapeHtml(decrypted || '')}" data-token="${escapeHtml(match)}">${escapeHtml(match)}</span>`;
   });
   view.innerHTML = html;
+  view.querySelectorAll("img.workspace-asset-image").forEach((image) => {
+   image.addEventListener("error", () => {
+    retryWorkspaceAssetImage(image);
+   }, { once: true });
+  });
   enhancePptxSlideReadView(view, markdown);
   view.querySelectorAll(".masked-pill").forEach((pill) => {
    pill.addEventListener("click", (event) => {

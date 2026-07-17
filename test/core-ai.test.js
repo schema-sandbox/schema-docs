@@ -537,6 +537,7 @@ test("importUploadPanel reports non-JSON upload responses without refreshing wor
     let fetchOptions = null;
     const alerts = [];
     const printed = [];
+    const progress = [];
     let manifestRefreshCount = 0;
     let inboxRefreshCount = 0;
     global.fetch = async (url, options) => {
@@ -571,7 +572,8 @@ test("importUploadPanel reports non-JSON upload responses without refreshing wor
       refreshInbox: () => {
         inboxRefreshCount += 1;
       },
-      print: (value) => printed.push(value)
+      print: (value) => printed.push(value),
+      setImportProgress: (active, text, state) => progress.push({ active, text, state })
     });
     await panel.uploadFile(file);
     assert.match(fetchUrl, /\/api\/import-upload\?/);
@@ -583,6 +585,9 @@ test("importUploadPanel reports non-JSON upload responses without refreshing wor
     assert.match(alerts.at(-1).message, /import_upload_non_json_response/);
     assert.match(alerts.at(-1).message, /local API server is running/);
     assert.equal(printed.at(-1).ok, false);
+    assert.equal(progress.at(-1).active, true);
+    assert.equal(progress.at(-1).state, "error");
+    assert.match(progress.at(-1).text, /Import failed/);
   } finally {
     global.fetch = originalFetch;
     delete global.window;
@@ -634,6 +639,45 @@ test("importUploadPanel selects successful imports and runs post-import preparat
     assert.equal(preparedRecord.id, "doc_pdf_1");
     assert.equal(alerts.some((alert) => alert.level === "success"), true);
     assert.equal(printed.at(-1).id, "doc_pdf_1");
+  } finally {
+    global.fetch = originalFetch;
+    delete global.window;
+  }
+});
+test("importUploadPanel shows progress for large PDF uploads", async () => {
+  const originalFetch = global.fetch;
+  global.window = { AI_DOC_EXCHANGE_TOKEN: "test-token" };
+  try {
+    const progress = [];
+    const alerts = [];
+    global.fetch = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        data: { id: "doc_large_pdf", sourceType: "pdf", title: "large" }
+      })
+    });
+    const panel = createImportUploadPanel({
+      $: () => ({ value: "" }),
+      workspacePath: () => "C:/workspace",
+      ensureWorkspace: async () => {},
+      localApiBaseUrl: () => "http://127.0.0.1:4177",
+      showAlert: (level, message) => alerts.push({ level, message }),
+      refreshManifest: async () => {},
+      refreshInbox: () => {},
+      print: () => {},
+      setImportProgress: (active, text) => progress.push({ active, text })
+    });
+    await panel.uploadFile({
+      name: "three-thousand-pages.pdf",
+      size: 64 * 1024 * 1024,
+      arrayBuffer: async () => new ArrayBuffer(8)
+    });
+    assert.equal(progress[0].active, true);
+    assert.match(progress[0].text, /Large PDFs can take several minutes/);
+    assert.equal(progress.at(-1).active, false);
+    assert.match(alerts[0].message, /Large file/);
   } finally {
     global.fetch = originalFetch;
     delete global.window;

@@ -41,8 +41,15 @@ return relPath;
 function nextFrame() {
 return new Promise((resolve) => requestAnimationFrame(resolve));
 }
-function setExtractionProgress($, active, text = "Extracting to Markdown. This might take a while.") {
-const panel = $("extractionProgress"), label = $("extractionProgressText"); if (!panel) return; panel.classList.toggle("hidden", !active); panel.dataset.active = active ? "true" : "false"; if (label) label.textContent = text;
+function setExtractionProgress($, active, text = "Extracting to Markdown. This might take a while.", state = "working") {
+const panel = $("extractionProgress"), label = $("extractionProgressText");
+if (panel) {
+panel.classList.toggle("hidden", !active);
+panel.dataset.active = active ? "true" : "false";
+panel.dataset.state = state;
+}
+if (label) label.textContent = text;
+globalThis.window?.schemaDocsSetLongTaskProgress?.(active, text, state);
 }
 export function createDocumentFlowPanel({
 $,
@@ -177,7 +184,10 @@ const lastSlash = Math.max(clean.lastIndexOf("/"), clean.lastIndexOf("\\"));
    const btn = $("importFile");
    setButtonState(btn, "loading");
    updateIntakeStatus("Importing...", srcPath, false);
+   setExtractionProgress($, true, "Importing document into the workspace. Large PDFs can take several minutes; keep this window open.");
    if (typeof showAlert === "function") showAlert("info", "Importing document path...");
+   await nextFrame();
+   let importFailed = false;
    try {
     const result = await api("/api/import", {
      sourcePath: srcPath
@@ -198,9 +208,13 @@ const lastSlash = Math.max(clean.lastIndexOf("/"), clean.lastIndexOf("\\"));
     }
     return result;
    } catch (err) {
+    importFailed = true;
     setButtonState(btn, "error");
     updateIntakeStatus("Import failed", err.message || String(err), false);
+    setExtractionProgress($, true, `Import failed: ${err.message || String(err)}`, "error");
     throw err;
+   } finally {
+    if (!importFailed) setExtractionProgress($, false);
    }
   }));
   $("createSampleDocx").addEventListener("click", () => run(async () => {

@@ -857,6 +857,21 @@ test("external Markdown export copies local visual assets beside the document", 
   assert.match(exported, /\.\/portable\.assets\/formula\.png/);
   assert.deepEqual(await readFile(path.join(destination, "portable.assets", "formula.png")), png);
 });
+test("merged export preserves existing files with numbered names", async () => {
+  const workspace = await tempDir("lft-export-numbered-");
+  await openOrCreateWorkspace(workspace);
+  await saveMarkdown(workspace, "notes/source.md", "first");
+  const output = path.join(workspace, "exports", "source.md");
+  const first = await exportMarkdownDocument(workspace, "notes/source.md", output, "md", { avoidOverwrite: true });
+  await saveMarkdown(workspace, "notes/source.md", "second");
+  const second = await exportMarkdownDocument(workspace, "notes/source.md", output, "md", { avoidOverwrite: true });
+  const third = await exportMarkdownDocument(workspace, "notes/source.md", output, "md", { avoidOverwrite: true });
+  assert.equal(first, output);
+  assert.equal(second, path.join(workspace, "exports", "source (2).md"));
+  assert.equal(third, path.join(workspace, "exports", "source (3).md"));
+  assert.equal(await readFile(first, "utf8"), "first");
+  assert.equal(await readFile(second, "utf8"), "second");
+});
 test("external Markdown export rejects traversal and non-image asset reads", async () => {
   const container = await tempDir("lft-md-assets-boundary-");
   const workspace = path.join(container, "workspace");

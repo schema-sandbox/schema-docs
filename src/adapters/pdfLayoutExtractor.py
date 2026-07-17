@@ -911,7 +911,7 @@ def render_visual_regions(page, page_number, regions, asset_dir, allow_reuse=Fal
     pending = []
     for index, region in enumerate(regions):
         kind = region.get("type") if region.get("type") in {"formula", "table"} else "figure"
-        bbox_key = ",".join(f"{float(value):.2f}" for value in region.get("bbox", []))
+        bbox_key = ("tight-v2," if kind == "formula" else "") + ",".join(f"{float(value):.2f}" for value in region.get("bbox", []))
         fingerprint = hashlib.sha1(bbox_key.encode("ascii", "ignore")).hexdigest()[:8]
         file_name = f"page-{page_number:06d}-{kind}-{index:03d}-{fingerprint}.png"
         target = asset_dir / file_name
@@ -933,7 +933,7 @@ def render_visual_regions(page, page_number, regions, asset_dir, allow_reuse=Fal
     for index, region, kind, file_name, target in pending:
         try:
             x0, top, x1, bottom = [float(value) for value in region["bbox"]]
-            padding = 8 if region.get("type") == "formula" else 0
+            padding = 3 if region.get("type") == "formula" else 0
             crop = (
                 max(0, int(x0 * scale) - padding),
                 max(0, int(top * scale) - padding),

@@ -4,6 +4,14 @@
   "private": true,
   "type": "module",
   "description": "Local-first AI document intake layer for Office, PDF, spreadsheet, Markdown, and API workflows.",
+  "homepage": "http://schemadocs.org/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/schema-sandbox/schema-docs.git"
+  },
+  "bugs": {
+    "url": "https://github.com/schema-sandbox/schema-docs/issues"
+  },
   "main": "./index.js",
   "exports": {
     ".": "./index.js"

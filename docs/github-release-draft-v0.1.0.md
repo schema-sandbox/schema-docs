@@ -34,9 +34,9 @@ Use the release assets attached to this GitHub Release:
 
 | Artifact | Purpose | Size | SHA-256 |
 |---|---|---:|---|
-| `schema-docs_0.1.0_x64-setup.exe` | Recommended NSIS installer for ordinary public-preview testing | 25,360,038 bytes | `f890a26d21eef48f464f86976268154f801eed24d62358139b0d57d6eb1c9f30` |
-| `schema-docs_0.1.0_x64_en-US.msi` | MSI package for installer comparison and managed deployment testing | 37,180,437 bytes | `7aefdf329f6eb51a04c863c99a62006688744cc9eb24c57f92bd70b9e371e148` |
-| `schema-docs_0.1.0_x64-portable.zip` | Portable ZIP containing `app.exe`, the required sibling `runtime/`, and license files | 37,018,675 bytes | `6eb8f4df480f749cc05fe21760c4b7ab3be5451e004e08813a6a00def72a1d54` |
+| `schema-docs_0.1.0_x64-setup.exe` | Recommended NSIS installer for ordinary public-preview testing | 25,363,526 bytes | `b3d4589537beaa1a3e8f448c20f82297a90eb613ec5f4c3ea5a1e57be2555fc2` |
+| `schema-docs_0.1.0_x64_en-US.msi` | MSI package for installer comparison and managed deployment testing | 37,180,437 bytes | `43d77a73507c497e91936b1f12c796585c91c05aaf28ff76306a8a8dee390cdf` |
+| `schema-docs_0.1.0_x64-portable.zip` | Portable ZIP containing `app.exe`, the required sibling `runtime/`, and license files | 37,017,580 bytes | `a629d30e2f97070804a7dcb1c623e3f4728bdfeff99ae1eed54d8710d2a368c7` |
 
 Extract the portable ZIP as a whole and keep `app.exe` beside its `runtime/` directory. A copied `app.exe` by itself is not a standalone package.
 

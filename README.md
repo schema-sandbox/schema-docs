@@ -1,5 +1,7 @@
 # Schema Docs (v0.1.0)
 
+[Website](http://schemadocs.org/) | [Repository](https://github.com/schema-sandbox/schema-docs)
+
 > **Local-first document conversion and AI intake for very large, difficult files. Before sending a document to AI, see what AI will see. Do not send raw files directly to AI.**
 >
 > Import Word, PDF, Excel, CSV, or Markdown; mask PII locally; trim the context; block unsafe sends; and export a verifiable SDXP exchange package.
@@ -112,7 +114,7 @@ The installed application opens directly as a normal Windows desktop app. It doe
 ### Developer / CLI (Node.js 22+)
 
 ```bash
-git clone https://github.com/liutengjiao/schema-docs.git
+git clone https://github.com/schema-sandbox/schema-docs.git
 cd schema-docs
 npm install
 npm run serve          # Start the local web UI and API at http://127.0.0.1:4177/
