@@ -12,7 +12,7 @@ npm run beta-check -- --mode public-preview
 
 | Area | Check Item | Status Requirement | Automated Verification Script |
 |------|------------|--------------------|---------------------------------|
-| **Tests** | Full Node test suite passes: 329 tests, 328 pass, 1 skipped manual external-sync scenario | Mandatory | `npm test` |
+| **Tests** | Full Node test suite passes: 333 tests, 332 pass, 1 skipped manual external-sync scenario | Mandatory | `npm test` |
 | **Verification** | Release check clean | Mandatory | `npm run release-check` |
 | **Fixture** | Strict desktop manual flows verification closed | Mandatory | `npm run fixture-check -- --strict` |
 | **Handoff** | F-012 closed and validated | Mandatory | `npm run release-readiness -- --mode public-preview` |

@@ -19,7 +19,7 @@ change logs so the project stays lightweight for public preview.
 
 ## Verified Commands
 
-- `npm test`: 329 tests, 328 pass, 1 skipped manual external-sync scenario.
+- `npm test`: 333 tests, 332 pass, 1 skipped manual external-sync scenario.
 - `npm run smoke`: passed exchange package read-back plus receiver/trust report writing.
 - `npm run fixture-smoke`: passed with 10 `pass`, 1 `known_limit`, and 1 `blocked` pending current-artifact desktop verification.
 - `npm run fixture-check`: passed.

@@ -274,7 +274,7 @@ src/
 public/                 - Web UI, vanilla JS ES modules, no bundler
 src-tauri/              - Tauri desktop shell, Rust and Cargo
 docs/                   - Protocol specs, known limits, release docs
-test/                   - 329 automated tests
+test/                   - 333 automated tests
 ```
 **Zero installed npm runtime dependencies**: the core uses Node.js built-ins plus bundled offline assets. Styled PDF export invokes a locally installed Edge or Chromium renderer.
 
@@ -283,7 +283,7 @@ test/                   - 329 automated tests
 ## Testing
 
 ```bash
-npm test                         # 329 automated tests at the source release audit: 328 pass, 1 manual external-sync scenario skipped
+npm test                         # 333 automated tests at the source release audit: 332 pass, 1 manual external-sync scenario skipped
 npm run release:public-preview   # One-command public-preview gate and handoff refresh
 npm run rc-check                 # Full public-preview RC preflight gate
 npm run public-preview-package -- --json  # Public-preview installer handoff report
