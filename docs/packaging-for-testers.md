@@ -6,9 +6,9 @@ This guide outlines available Windows build packages, system runtime requirement
 
 | Package Name | File Type | Size | Intended Audience & Recommendations |
 |--------------|-----------|------|-------------------------------------|
-| `schema-docs_0.1.0_x64-portable.zip` | Portable ZIP | ~34.9MB | Extract the whole ZIP for no-install testing; keep `app.exe` beside `runtime/`. |
-| `schema-docs_0.1.0_x64-setup.exe` | NSIS Setup Bundle | ~23.8MB | Normal manual testing and standard installer path. |
-| `schema-docs_0.1.0_x64_en-US.msi` | MSI Deployment Package | ~35.0MB | Enterprise deployment, silent network installations, and bulk rollouts. |
+| `schema-docs_0.1.1_x64-portable.zip` | Portable ZIP | ~34.9MB | Extract the whole ZIP for no-install testing; keep `app.exe` beside `runtime/`. |
+| `schema-docs_0.1.1_x64-setup.exe` | NSIS Setup Bundle | ~23.8MB | Normal manual testing and standard installer path. |
+| `schema-docs_0.1.1_x64_en-US.msi` | MSI Deployment Package | ~35.0MB | Enterprise deployment, silent network installations, and bulk rollouts. |
 
 The build-tree `app.exe` is not a standalone distribution file. It requires the generated sibling `runtime/` directory, so release operators should distribute the portable ZIP or an installer instead of copying the EXE alone.
 

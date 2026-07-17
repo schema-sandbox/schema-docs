@@ -209,7 +209,7 @@ export async function checkDesktopPreflightManifest(options = {}) {
   } catch (error) {
     return {
       ok: false,
-      releaseTarget: "v0.1.0",
+      releaseTarget: "v0.1.1",
       manifestPath,
       failures: [failure("manifest_unreadable", { path: manifestPath, error: error.message })],
       files: []
@@ -217,7 +217,7 @@ export async function checkDesktopPreflightManifest(options = {}) {
   }
 
   const shapeFailures = [
-    manifest.releaseTarget !== "v0.1.0" && failure("release_target_mismatch", manifest.releaseTarget),
+    manifest.releaseTarget !== "v0.1.1" && failure("release_target_mismatch", manifest.releaseTarget),
     manifest.manifestType !== "desktop-preflight" && failure("manifest_type_mismatch", manifest.manifestType),
     !Array.isArray(manifest.files) && failure("files_missing", null),
     Array.isArray(manifest.files) && manifest.fileCount !== manifest.files.length && failure("file_count_mismatch", { expected: manifest.fileCount, actual: manifest.files.length })
@@ -233,7 +233,7 @@ export async function checkDesktopPreflightManifest(options = {}) {
 
   return {
     ok: failures.length === 0,
-    releaseTarget: "v0.1.0",
+    releaseTarget: "v0.1.1",
     manifestPath,
     manifestType: manifest.manifestType,
     fileCount: manifest.fileCount ?? 0,

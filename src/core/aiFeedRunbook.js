@@ -144,7 +144,7 @@ const markdownRelativePath = `${outputBase}.md`;
 const jsonRelativePath = `${outputBase}.json`;
 const runbook = {
 kind: "ai_feed_runbook",
-version: "0.1.0",
+version: "0.1.1",
 createdAt,
 recordIdOrPackagePath,
 bodyFree: true,

@@ -1,9 +1,9 @@
-# Public Preview Manual Verification Checklist (v0.1.0)
+# Public Preview Manual Verification Checklist (v0.1.1)
 
 This checklist guides manual testers through validating the core workflows of Schema Docs on Windows. Follow the steps in sequence and record your results.
 
 > [!IMPORTANT]
-> **Primary Target Platform**: Windows is the prioritized target for the v0.1.0 public preview. Verification on other operating systems is not promised or officially supported for this release.
+> **Primary Target Platform**: Windows is the prioritized target for the v0.1.1 public preview. Verification on other operating systems is not promised or officially supported for this release.
 
 > [!WARNING]
 > **Privacy Safety Warning**: Do NOT paste or record real production API keys, production tokens, or actual credentials in the workspace settings, prompt preview field, or verification records. Use mock keys (e.g. `sk-proj-123456...` or `bearer eyJ...`) for verification.
@@ -15,7 +15,7 @@ This checklist guides manual testers through validating the core workflows of Sc
 ### Step 1: Client Installation
 * **Instructions**: Verify that the application installer runs correctly without requiring administrative rights.
 * **Steps**:
-  1. Double-click `schema-docs_0.1.0_x64-setup.exe`.
+  1. Double-click `schema-docs_0.1.1_x64-setup.exe`.
   2. Follow the setup wizard to complete the installation.
   3. Verify that a shortcut named **Schema Docs** is created on your Desktop.
 
@@ -171,7 +171,7 @@ When submitting verification records or bug reports, please compile the followin
 This runbook helps you verify the end-to-end functionality of Schema Docs in under 30 minutes.
 
 ### 1. Install & Launch (Time: 3 mins)
-* **Action**: Run the installer (`schema-docs_0.1.0_x64-setup.exe`) and launch the application from the desktop shortcut.
+* **Action**: Run the installer (`schema-docs_0.1.1_x64-setup.exe`) and launch the application from the desktop shortcut.
 * **Expected Result**: The installer runs without administrative elevation (UAC) prompts, creates a desktop shortcut, and launches a clean graphical user interface (GUI) without any error dialogs.
 
 ### 2. Run Diagnostics & Bridge Check (Time: 3 mins)

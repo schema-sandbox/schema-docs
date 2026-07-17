@@ -42,7 +42,7 @@ export async function buildDesktopVerificationRecord(options = {}) {
   const sendGateOk = Boolean(workflow.aiPreviewOk && workflow.aiSensitivePreviewOk && workflow.aiBlockedSendOk);
 
   return {
-    releaseTarget: "v0.1.0",
+    releaseTarget: "v0.1.1",
     recordType: "desktop-verification",
     artifact: {
       path: artifact?.path ?? "",

@@ -46,7 +46,7 @@ doc = null;
 const inputType = doc?.sourceType || "unknown";
 const nameClean = doc?.name ? doc.name.replace(/[^a-zA-Z0-9_.-]/g, "_") : "input_file";
 const reproDetails = {
-appVersion: "0.1.0",
+appVersion: "0.1.1",
 inputType,
 recordId: recordId || "unknown",
 suggestedReproSteps: [

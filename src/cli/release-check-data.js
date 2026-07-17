@@ -23,7 +23,7 @@ export const requiredDocs = [
   "docs/sample-scenarios.md",
   "docs/real-sample-regression.md",
   "docs/public-preview-sample-report.md",
-  "docs/github-release-draft-v0.1.0.md",
+  "docs/github-release-draft-v0.1.1.md",
   "docs/developer-quickstart.md",
   "docs/tester-onboarding.md"
 ];

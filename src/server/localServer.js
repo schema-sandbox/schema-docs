@@ -78,7 +78,7 @@ documentsMtime = fs.statSync(docPath).mtime.toISOString();
 } catch {}
 sendOk(response, {
 service: "schema-docs-local-api",
-version: "0.1.0",
+version: "0.1.1",
 workspaceRequired: true,
 diagnostics: { appMode: ROOT.includes("Schema Sandbox") ? "source" : "packaged", startTime: serverStartTime, gitCommit, documentsMtime }
 });

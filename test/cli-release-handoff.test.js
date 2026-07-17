@@ -110,11 +110,11 @@ async function writeBlockedF012Results(filePath) {
 }
 test("release-artifacts reports build artifact checksums when present", async () => {
   const result = await runCliJson(releaseArtifactsPath);
-  assert.equal(result.releaseTarget, "v0.1.0");
+  assert.equal(result.releaseTarget, "v0.1.1");
   assert.equal(result.generatedBy, "npm run release-artifacts");
   assert.equal(result.artifacts.length, 4);
   assertArtifact(result, (artifact) => artifact.path.endsWith("app.exe"));
-  assertArtifact(result, (artifact) => artifact.path.endsWith("schema-docs_0.1.0_x64-portable.zip"));
+  assertArtifact(result, (artifact) => artifact.path.endsWith("schema-docs_0.1.1_x64-portable.zip"));
   for (const artifact of result.artifacts) {
     if (artifact.exists) {
       assert.equal(typeof artifact.bytes, "number");
@@ -127,7 +127,7 @@ test("release-index writes tester handoff artifact index", async () => {
   const jsonPath = path.join(outDir, "nested", "release-artifact-index.json");
   const markdownPath = path.join(outDir, "nested", "release-artifact-index.md");
   const result = await runCliJson(releaseArtifactsIndexPath, ["--out", jsonPath, "--markdown", markdownPath, "--json"]);
-  assert.equal(result.targetVersion, "v0.1.0");
+  assert.equal(result.targetVersion, "v0.1.1");
   assert.equal(result.generatedBy, "npm run release-index");
   assert.equal(result.releaseMode, "public-preview");
   assert.equal(result.artifacts.length, 4);
@@ -156,7 +156,7 @@ test("rc-check json output is archive-ready", async () => {
   await writeBlockedF012Results(tempResultsPath);
   const result = await runCliJson(rcCheckPath, ["--json", "--results", tempResultsPath]);
   assert.equal(result.ok, false);
-  assert.equal(result.releaseTarget, "v0.1.0");
+  assert.equal(result.releaseTarget, "v0.1.1");
   assert.equal(result.releaseMode, "public-preview");
   assert.match(result.generatedAt, /^\d{4}-\d{2}-\d{2}T/);
   assertExpectedSubset(result, {
@@ -184,7 +184,7 @@ test("private-beta-package summarizes tester-ready installer handoff", async () 
   const tempResultsPath = path.join(outDir, "fixture-results.json");
   await writeBlockedF012Results(tempResultsPath);
   const result = await runCliRejectJson(privateBetaPackagePath, ["--json", "--out", jsonPath, "--markdown", markdownPath, "--results", tempResultsPath]);
-  assert.equal(result.releaseTarget, "v0.1.0");
+  assert.equal(result.releaseTarget, "v0.1.1");
   assert.equal(result.generatedBy, "npm run private-beta-package");
   assert.equal(result.releaseMode, "private-beta");
   assert.equal(result.decision.recommendedAudience, result.decision.ready ? "private-beta-testers" : "internal-only");
@@ -209,7 +209,7 @@ test("public-preview-package summarizes public installer handoff", async () => {
   const tempResultsPath = path.join(outDir, "fixture-results.json");
   await writeBlockedF012Results(tempResultsPath);
   const result = await runCliRejectJson(privateBetaPackagePath, ["--mode", "public-preview", "--json", "--out", jsonPath, "--markdown", markdownPath, "--results", tempResultsPath]);
-  assert.equal(result.releaseTarget, "v0.1.0");
+  assert.equal(result.releaseTarget, "v0.1.1");
   assert.equal(result.generatedBy, "npm run public-preview-package");
   assert.equal(result.releaseMode, "public-preview");
   assert.equal(result.decision.recommendedAudience, result.decision.ready ? "public-preview-testers" : "internal-only");
@@ -300,7 +300,7 @@ test("fixture-check validates result evidence and plan/result alignment", async 
   const planPath = path.join(workspace, "fixture-plan.json");
   const resultsPath = path.join(workspace, "fixture-results.json");
   await writeJson(planPath, {
-    releaseTarget: "v0.1.0",
+    releaseTarget: "v0.1.1",
     policy: {
       allowSensitiveFiles: false,
       minimumWorkflowCount: 1,
@@ -328,7 +328,7 @@ test("fixture-check validates result evidence and plan/result alignment", async 
     ]
   });
   await writeJson(resultsPath, {
-    releaseTarget: "v0.1.0",
+    releaseTarget: "v0.1.1",
     results: [
       {
         id: "F-A",
@@ -439,9 +439,9 @@ test("release-check validates desktop runtime bridge and current size budget", a
     windows_release_checksums_current: {
       file: "release/windows/SHA256SUMS.txt",
       requiredAssets: [
-        "schema-docs_0.1.0_x64_en-US.msi",
-        "schema-docs_0.1.0_x64-setup.exe",
-        "schema-docs_0.1.0_x64-portable.zip"
+        "schema-docs_0.1.1_x64_en-US.msi",
+        "schema-docs_0.1.1_x64-setup.exe",
+        "schema-docs_0.1.1_x64-portable.zip"
       ],
       format: "<64 lowercase hexadecimal SHA-256>  <artifact basename>",
       policy: {
@@ -534,7 +534,7 @@ test("release-readiness summarizes current F-012 release blocker", async () => {
   const failedOutPath = path.join(workspace, "readiness.blocked.json");
   const reportOnlyOutPath = path.join(workspace, "readiness.report.json");
   const result = await runCliRejectJson(releaseReadinessPath, ["--out", failedOutPath, "--results", tempResultsPath]);
-  assert.equal(result.releaseTarget, "v0.1.0");
+  assert.equal(result.releaseTarget, "v0.1.1");
   assert.equal(result.releaseMode, "public-preview");
   assert.equal(result.reportOnly, false);
   assert.equal(result.outPath, failedOutPath);
@@ -571,7 +571,7 @@ test("release-readiness summarizes current F-012 release blocker", async () => {
 });
 test("release-readiness reports unsupported release modes clearly", async () => {
   const result = await runCliRejectJson(releaseReadinessPath, ["--mode", "publc-preview"]);
-  assert.equal(result.releaseTarget, "v0.1.0");
+  assert.equal(result.releaseTarget, "v0.1.1");
   assert.equal(result.releaseMode, "publc-preview");
   assert.equal(result.readyForPublicTag, false);
   assert.equal(result.status, "blocked");

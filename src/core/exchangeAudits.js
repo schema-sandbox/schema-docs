@@ -65,7 +65,7 @@ return [
 `- Package type: ${manifest.packageType ?? "unknown"}`,
 `- Package version: ${manifest.packageVersion ?? "1.0.0"}`,
 `- Created at: ${manifest.createdAt ?? ""}`,
-`- Created by: Schema Docs ${manifest.createdByVersion ?? "0.1.0"}`,
+`- Created by: Schema Docs ${manifest.createdByVersion ?? "0.1.1"}`,
 "",
 "## Verdict",
 "",

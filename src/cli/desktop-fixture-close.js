@@ -121,7 +121,7 @@ export async function runDesktopFixtureClose(options = {}) {
   if (!recordArg) {
     return {
       ok: false,
-      releaseTarget: "v0.1.0",
+      releaseTarget: "v0.1.1",
       error: "Missing required --record <filled-desktop-verification-record.json>."
     };
   }
@@ -135,7 +135,7 @@ export async function runDesktopFixtureClose(options = {}) {
   if (!strictCheck.ok) {
     return {
       ok: false,
-      releaseTarget: "v0.1.0",
+      releaseTarget: "v0.1.1",
       dryRun: !shouldWrite,
       recordPath,
       resultsPath,
@@ -151,7 +151,7 @@ export async function runDesktopFixtureClose(options = {}) {
   if (!artifactCheck.ok) {
     return {
       ok: false,
-      releaseTarget: "v0.1.0",
+      releaseTarget: "v0.1.1",
       dryRun: !shouldWrite,
       recordPath,
       resultsPath,
@@ -176,7 +176,7 @@ export async function runDesktopFixtureClose(options = {}) {
 
   return {
     ok: true,
-    releaseTarget: "v0.1.0",
+    releaseTarget: "v0.1.1",
     dryRun: !shouldWrite,
     recordPath,
     resultsPath,

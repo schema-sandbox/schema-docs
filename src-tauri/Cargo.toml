@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.1.0"
+version = "0.1.1"
 description = "Local-first document conversion and AI intake for large Office, PDF, spreadsheet, and Markdown files."
 authors = ["Schema Sandbox Technology Limited"]
 license = "MIT"

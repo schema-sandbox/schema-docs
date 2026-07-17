@@ -47,7 +47,7 @@ export async function handleWorkspaceCommand({ command, workspace, rest, printJs
 
       output += `Exchange Packages (${summaryData.exchangePackages.length}):\n`;
       for (const p of summaryData.exchangePackages) {
-        output += `  - ${p.name} (v${p.packageVersion || "0.1.0"}, created: ${p.createdAt})\n`;
+        output += `  - ${p.name} (v${p.packageVersion || "0.1.1"}, created: ${p.createdAt})\n`;
         output += `    receiver-report: ${p.receiverReport?.exists ? "yes" : "no"}, trust-report: ${p.trustReport?.exists ? "yes" : "no"}\n`;
       }
       output += `\n`;

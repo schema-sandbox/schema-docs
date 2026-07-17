@@ -426,7 +426,7 @@ export function getChecksPart2(context) {
       name: "sample_fixture_plan_ready",
       ok: Boolean(
         fixturePlan
-        && fixturePlan.releaseTarget === "v0.1.0"
+        && fixturePlan.releaseTarget === "v0.1.1"
         && Array.isArray(fixturePlan.workflows)
         && fixturePlan.workflows.length >= (fixturePlan.policy?.minimumWorkflowCount ?? 10)
         && requiredFixtureCoverage.every((item) => fixtureCoverage.has(item))
@@ -455,7 +455,7 @@ export function getChecksPart2(context) {
       name: "sample_fixture_results_ready",
       ok: Boolean(
         fixtureResults
-        && fixtureResults.releaseTarget === "v0.1.0"
+        && fixtureResults.releaseTarget === "v0.1.1"
         && Array.isArray(fixtureResults.results)
         && fixtureResults.results.length === (fixturePlan?.workflows?.length ?? 0)
         && fixtureResultsAligned

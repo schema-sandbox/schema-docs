@@ -5,7 +5,7 @@ const capabilities = listDocumentExchangeCapabilities();
 return {
 capability_type: "document.exchange",
 name: "Schema Docs Local Document Exchange",
-version: "0.1.0",
+version: "0.1.1",
 input_contract: {
 accepted_formats: ["md", "txt", "pdf", "docx", "pptx", "xlsx", "csv"],
 document_exchange_formats: DOCUMENT_EXCHANGE_FORMATS,

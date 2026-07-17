@@ -127,7 +127,7 @@ test("Exchange package manifest and explanation verification", async () => {
   const pkgRead = await service.readExchangePackage("packages/my-package");
   assert.equal(pkgRead.valid, true);
   assert.equal(pkgRead.manifest.packageVersion, "1.2.3");
-  assert.equal(pkgRead.manifest.createdByVersion, "0.1.0");
+  assert.equal(pkgRead.manifest.createdByVersion, "0.1.1");
   const explanation = await service.explainExchangePackage("packages/my-package");
   assert.equal(explanation.title, "Verify Test Package");
   assert.equal(explanation.knownLimitsCount, 1);

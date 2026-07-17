@@ -1,4 +1,4 @@
-# Schema Docs (v0.1.0)
+# Schema Docs (v0.1.1)
 
 [Website](http://schemadocs.org/) | [Repository](https://github.com/schema-sandbox/schema-docs)
 
@@ -105,8 +105,8 @@ AI Model  --or--  Exchange Package  --or--  Block (local evidence log)
 
 Download the latest release installer:
 
-- **NSIS setup**: `schema-docs_0.1.0_x64-setup.exe`
-- **MSI package**: `schema-docs_0.1.0_x64_en-US.msi`
+- **NSIS setup**: `schema-docs_0.1.1_x64-setup.exe`
+- **MSI package**: `schema-docs_0.1.1_x64_en-US.msi`
 
 The installed application opens directly as a normal Windows desktop app. It does not open a Command Prompt, PowerShell, Node.js, or other code window. `Start-Desktop-Client.bat` is retained only as a developer/test launcher and may display diagnostic output.
 
