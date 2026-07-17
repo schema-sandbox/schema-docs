@@ -13,7 +13,7 @@ Schema Docs v0.1.1 is a patch release for the Windows public preview.
 
 ## Windows artifacts
 
-Upload the four files generated in `release/windows`:
+Windows downloads:
 
 - `schema-docs_0.1.1_x64-setup.exe`
 - `schema-docs_0.1.1_x64_en-US.msi`

@@ -6,10 +6,10 @@
 >
 > Import Word, PDF, Excel, CSV, or Markdown; mask PII locally; trim the context; block unsafe sends; and export a verifiable SDXP exchange package.
 
-[![Tests](https://img.shields.io/badge/tests-328%20passing%20%2F%201%20skipped-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-332%20passing%20%2F%201%20skipped-brightgreen)](#testing)
 [![License](https://img.shields.io/badge/license-MIT-blue)](#license)
 [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)](#installation)
-[![Version](https://img.shields.io/badge/version-v0.1.0--public--preview-orange)](#changelog)
+[![Version](https://img.shields.io/badge/version-v0.1.1--public--preview-orange)](#changelog)
 
 Schema Docs is for people who already feed documents into ChatGPT, Claude, Gemini, or private LLM workflows and want a safer intake layer before any content leaves the machine. It is not trying to replace Office; it protects the moment before a document becomes AI context.
 
