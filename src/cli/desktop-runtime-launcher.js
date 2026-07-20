@@ -1,7 +1,7 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
-import { listenLocalServer } from "../server/localServer.js";
+import { listenSecureLocalServer } from "../server/secureLocalServer.js";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const sessionDir = process.env.SCHEMA_DOCS_RUNTIME_SESSION_DIR
@@ -18,30 +18,29 @@ const fetchBlockedPorts = new Set([
   5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6697, 10080
 ]);
 
+function emitBootstrapMarker({ apiBaseUrl, bootstrapToken }) {
+  const encoded = Buffer.from(JSON.stringify({ baseUrl: apiBaseUrl, bootstrapToken }), "utf8").toString("base64url");
+  // Keep stdout machine-readable for existing runtime diagnostics and smoke
+  // checks. The desktop bridge reads the one-time bootstrap marker from the
+  // separately captured stderr tail.
+  console.error(`SCHEMA_DOCS_BOOTSTRAP ${encoded}`);
+}
+
 async function tryListen(port) {
   try {
-    const server = await listenLocalServer({ port, host, token });
-    return {
-      port,
-      server
-    };
+    const server = await listenSecureLocalServer({ port, host, token, onBootstrapToken: emitBootstrapMarker });
+    return { port, server };
   } catch (error) {
-    if (error.code !== "EADDRINUSE") {
-      throw error;
-    }
+    if (error.code !== "EADDRINUSE") throw error;
     return null;
   }
 }
 
 async function listenWithFallback(startPort) {
   for (let port = startPort; port < startPort + 20; port += 1) {
-    if (fetchBlockedPorts.has(port)) {
-      continue;
-    }
+    if (fetchBlockedPorts.has(port)) continue;
     const result = await tryListen(port);
-    if (result) {
-      return result;
-    }
+    if (result) return result;
   }
   throw new Error(`No available desktop runtime port from ${startPort} to ${startPort + 19}.`);
 }
@@ -54,18 +53,17 @@ const session = {
   baseUrl,
   port,
   host,
-  tokenSource: process.env.SCHEMA_DOCS_DESKTOP_TOKEN ? "env" : "generated"
+  pid: process.pid,
+  tokenSource: process.env.SCHEMA_DOCS_DESKTOP_TOKEN ? "env" : "generated",
+  transport: "secured-loopback-proxy+private-pipe"
 };
 
 let sessionPath = path.join(sessionDir, "session.json");
 let sessionWriteError = "";
 try {
   await mkdir(sessionDir, { recursive: true });
-  await writeFile(
-    sessionPath,
-    JSON.stringify(session, null, 2) + "\n",
-    "utf8"
-  );
+  await writeFile(sessionPath, JSON.stringify(session, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
+  if (process.platform !== "win32") await chmod(sessionPath, 0o600);
 } catch (error) {
   sessionPath = "";
   sessionWriteError = error.message;
@@ -76,7 +74,7 @@ console.log(JSON.stringify({
   ...session,
   sessionPath,
   sessionWriteError,
-  message: "Schema Docs desktop runtime is running. Keep this process alive while using the desktop shell."
+  message: "Schema Docs desktop runtime is running through a secured loopback proxy."
 }, null, 2));
 
 function shutdown() {

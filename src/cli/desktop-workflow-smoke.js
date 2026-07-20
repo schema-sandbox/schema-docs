@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { createSchemaDocsLocalClient } from "../sdk/localApiClient.js";
 import { KATEX_WOFF2_FONT_FILES } from "../core/katexRuntimeAssets.js";
 
@@ -86,17 +87,6 @@ async function discoverRuntime() {
   return { ok: false, lastError, lastProbe };
 }
 
-async function readAppConfig(baseUrl) {
-  const response = await fetch(`${baseUrl}/app-config.js`);
-  const script = await response.text();
-  const token = script.match(/AI_DOC_EXCHANGE_TOKEN\s*=\s*"([^"]+)"/)?.[1];
-  const apiBaseUrl = script.match(/SCHEMA_DOCS_API_BASE_URL\s*=\s*"([^"]+)"/)?.[1] ?? baseUrl;
-  if (!response.ok || !token) {
-    throw new Error("Desktop app config did not expose a local session token.");
-  }
-  return { token, apiBaseUrl };
-}
-
 async function stopProcessTree(pid) {
   if (!pid) return { attempted: false, method: "none" };
 
@@ -135,8 +125,8 @@ function isProcessRunning(pid) {
   }
 }
 
-async function runWorkflow(runtime) {
-  const { token, apiBaseUrl } = await readAppConfig(runtime.baseUrl);
+async function runWorkflow(runtime, token) {
+  const apiBaseUrl = runtime.baseUrl;
   const bootstrapClient = createSchemaDocsLocalClient({ baseUrl: apiBaseUrl, token });
   const createdWorkspace = await bootstrapClient.createTempWorkspace();
   const workspace = createdWorkspace.workspacePath;
@@ -273,11 +263,13 @@ if (!existsSync(appPath)) {
     scanRange: `${host}:${startPort}-${endPort}`
   });
 } else {
+  const smokeToken = randomBytes(24).toString("hex");
   const child = spawn(appPath, [], {
     stdio: "ignore",
     env: {
       ...process.env,
-      SCHEMA_DOCS_DESKTOP_PORT: String(startPort)
+      SCHEMA_DOCS_DESKTOP_PORT: String(startPort),
+      SCHEMA_DOCS_DESKTOP_TOKEN: smokeToken
     }
   });
   const appExit = {
@@ -296,7 +288,7 @@ if (!existsSync(appPath)) {
   let workflowError = "";
   if (runtime.ok) {
     try {
-      workflow = await runWorkflow(runtime);
+      workflow = await runWorkflow(runtime, smokeToken);
     } catch (error) {
       workflowError = error.message;
     }
