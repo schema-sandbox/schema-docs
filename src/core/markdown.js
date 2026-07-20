@@ -1,6 +1,6 @@
 import path from "node:path";
-import { mkdir, readFile, writeFile, rm } from "node:fs/promises";
-import { assertInsideRoot, assertSafeWritePath } from "./pathGuard.js";
+import { readFile, writeFile, rm } from "node:fs/promises";
+import { assertInsideRoot, prepareSafeWritePath } from "./pathGuard.js";
 function fixLegacyPdfNotice(content) {
 const text = String(content ?? "");
 if (
@@ -74,8 +74,7 @@ return relativePath === "outputs" || relativePath.startsWith("outputs/");
 export async function saveMarkdown(workspacePath, relativePath, content) {
 const isAbs = path.isAbsolute(relativePath);
 const outputPath = isAbs ? relativePath : path.join(workspacePath, relativePath);
-await mkdir(path.dirname(outputPath), { recursive: true });
-const safePath = await assertSafeWritePath(outputPath, workspacePath, [".md"]);
+const safePath = await prepareSafeWritePath(outputPath, workspacePath, [".md"]);
 await writeFile(safePath, content, "utf8");
 return safePath;
 }
