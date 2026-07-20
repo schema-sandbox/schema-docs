@@ -39,15 +39,25 @@ export function isTrustedLocalUrl(value = "") {
   }
 }
 
-export function trustedCorsOrigin(headers = {}) {
-  const origin = headers.origin;
-  return isTrustedLocalUrl(origin) ? origin : "";
+function canonicalLocalOrigin(value = "") {
+  if (!isTrustedLocalUrl(value)) return "";
+  const parsed = new URL(value);
+  return `${parsed.protocol}//${parsed.host}`.toLowerCase();
 }
 
-export function hasTrustedBrowserContext(headers = {}) {
-  const fetchSite = String(headers["sec-fetch-site"] || "").toLowerCase();
-  if (fetchSite === "same-origin" || fetchSite === "same-site" || fetchSite === "none") return true;
-  return isTrustedLocalUrl(headers.origin) || isTrustedLocalUrl(headers.referer);
+export function trustedCorsOrigin(headers = {}, allowedOrigins = []) {
+  const origin = headers.origin;
+  const canonical = canonicalLocalOrigin(origin);
+  if (!canonical) return "";
+  const allowed = new Set(allowedOrigins.map(canonicalLocalOrigin).filter(Boolean));
+  return allowed.has(canonical) ? origin : "";
+}
+
+export function hasTrustedBrowserContext(headers = {}, allowedOrigins = []) {
+  const allowed = new Set(allowedOrigins.map(canonicalLocalOrigin).filter(Boolean));
+  return [headers.origin, headers.referer]
+    .map(canonicalLocalOrigin)
+    .some((origin) => origin && allowed.has(origin));
 }
 
 export function isAbsoluteLocalPath(value = "") {

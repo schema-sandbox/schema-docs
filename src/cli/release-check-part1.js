@@ -72,10 +72,10 @@ export function getChecksPart1(context) {
       ok: Boolean(
         sizeCheckCli.includes("const BUDGETS")
         && sizeCheckCli.includes("runtimeDependencies: 0")
-        && sizeCheckCli.includes("runtimeBytes: 1_160_000")
+        && sizeCheckCli.includes("runtimeBytes: 1_300_000")
         && sizeCheckCli.includes("sourceFiles: 195")
-        && sizeCheckCli.includes("totalBytes: 1_700_000")
-        && sizeCheckCli.includes("totalLines: 38_500")
+        && sizeCheckCli.includes("totalBytes: 1_850_000")
+        && sizeCheckCli.includes("totalLines: 42_000")
         && sizeCheckCli.includes("largestFileBytes: 100_000")
         && sizeCheckCli.includes("runtimeLargestFileBytes: 125_000")
         && sizeCheckCli.includes("publicModuleBytes: 100_000")

@@ -283,7 +283,11 @@ export function getChecksPart2(context) {
       ok: Boolean(
         packageJson.scripts?.["desktop:workflow-smoke"] === "node src/cli/desktop-workflow-smoke.js"
         && desktopWorkflowSmoke.includes("createSchemaDocsLocalClient")
-        && desktopWorkflowSmoke.includes("/app-config.js")
+        && desktopWorkflowSmoke.includes("randomBytes(24)")
+        && desktopWorkflowSmoke.includes("SCHEMA_DOCS_DESKTOP_TOKEN")
+        && desktopWorkflowSmoke.includes("runWorkflow(runtime, smokeToken)")
+        && !desktopWorkflowSmoke.includes("/app-config.js")
+        && !desktopWorkflowSmoke.includes("AI_DOC_EXCHANGE_TOKEN")
         && desktopWorkflowSmoke.includes("createTempWorkspace")
         && desktopWorkflowSmoke.includes("createSampleDocx")
         && desktopWorkflowSmoke.includes("sampleDocxOk")

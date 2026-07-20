@@ -27,10 +27,26 @@
     if (typeof invoke !== "function") throw new Error("Secure desktop runtime bridge is unavailable.");
     return invoke(command, args);
   };
+  const readFragmentBootstrapDescriptor = () => {
+    const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const encoded = params.get("bootstrap");
+    if (!encoded) return null;
+    const descriptor = parseLatestBootstrapMarker(`SCHEMA_DOCS_BOOTSTRAP ${encoded}`);
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+    return descriptor;
+  };
   const readBootstrapDescriptor = async () => {
+    const fragmentDescriptor = readFragmentBootstrapDescriptor();
+    if (fragmentDescriptor?.baseUrl && fragmentDescriptor?.bootstrapToken) return fragmentDescriptor;
     for (let attempt = 0; attempt < 40; attempt += 1) {
-      const diagnostics = await tauriInvoke("get_desktop_runtime_diagnostics");
-      const descriptor = parseLatestBootstrapMarker(diagnostics?.logs?.stdout?.tail || "");
+      let diagnostics;
+      try {
+        diagnostics = await tauriInvoke("get_desktop_runtime_diagnostics");
+      } catch {
+        throw new Error("Open Schema Docs using the one-time pairing URL printed by the local server.");
+      }
+      const descriptor = parseLatestBootstrapMarker(diagnostics?.logs?.stderr?.tail || "")
+        || parseLatestBootstrapMarker(diagnostics?.logs?.stdout?.tail || "");
       if (descriptor?.baseUrl && descriptor?.bootstrapToken) return descriptor;
       await delay(100);
     }

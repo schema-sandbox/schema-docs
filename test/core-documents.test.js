@@ -838,9 +838,9 @@ test("exports workspace markdown to docx and pdf files", async () => {
   assert.match(readZipEntry(await readFile(docxPath), "word/document.xml").toString("utf8"), /Export me/);
   assert.match(await pdfBufferToMarkdown(await readFile(pdfPath), "source.pdf"), /Export me/);
 });
-test("external Markdown export copies local visual assets beside the document", async () => {
+test("workspace Markdown export copies local visual assets beside the document", async () => {
   const workspace = await tempDir("lft-md-assets-");
-  const destination = await tempDir("lft-md-assets-out-");
+  const destination = path.join(workspace, "exports");
   await openOrCreateWorkspace(workspace);
   const assetDir = path.join(workspace, "assets", "Physics Book.pdf");
   await mkdir(assetDir, { recursive: true });
@@ -872,12 +872,11 @@ test("merged export preserves existing files with numbered names", async () => {
   assert.equal(await readFile(first, "utf8"), "first");
   assert.equal(await readFile(second, "utf8"), "second");
 });
-test("external Markdown export rejects traversal and non-image asset reads", async () => {
+test("workspace Markdown export rejects traversal and non-image asset reads", async () => {
   const container = await tempDir("lft-md-assets-boundary-");
   const workspace = path.join(container, "workspace");
-  const destination = path.join(container, "destination");
+  const destination = path.join(workspace, "exports");
   const outsidePng = path.join(container, "outside.png");
-  await mkdir(destination, { recursive: true });
   await openOrCreateWorkspace(workspace);
   await writeFile(outsidePng, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/l4QW2QAAAABJRU5ErkJggg==", "base64"));
   await mkdir(path.join(workspace, "assets"), { recursive: true });

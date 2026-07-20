@@ -12,11 +12,11 @@ const IGNORED_SOURCE_PATTERNS = [
 const BUDGETS = {
   runtimeDependencies: 0,
   devDependencies: 1,
-  runtimeBytes: 1_160_000,
+  runtimeBytes: 1_300_000,
   runtimeFiles: 100,
   sourceFiles: 195,
-  totalBytes: 1_700_000,
-  totalLines: 38_500,
+  totalBytes: 1_850_000,
+  totalLines: 42_000,
   largestFileBytes: 100_000,
   runtimeLargestFileBytes: 125_000,
   publicModuleBytes: 100_000

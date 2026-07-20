@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { prepareSafeWritePath } from "../src/core/pathGuard.js";
 import { listZipEntries, readZipEntry } from "../src/core/zip.js";
+import { listenSecureLocalServer } from "../src/server/secureLocalServer.js";
 import { buildZip } from "../test/helpers/zipBuilder.js";
 import {
   HttpSecurityError,
@@ -80,12 +81,53 @@ test("ZIP parser enforces configurable entry and total expansion limits", () => 
 });
 
 test("HTTP security trusts only loopback browser contexts", () => {
+  const allowedOrigins = ["http://localhost:4177", "tauri://localhost"];
   assert.equal(isTrustedHostHeader("127.0.0.1:4177"), true);
   assert.equal(isTrustedHostHeader("evil.example"), false);
-  assert.equal(trustedCorsOrigin({ origin: "http://localhost:4177" }), "http://localhost:4177");
-  assert.equal(trustedCorsOrigin({ origin: "https://evil.example" }), "");
-  assert.equal(hasTrustedBrowserContext({ referer: "tauri://localhost/" }), true);
-  assert.equal(hasTrustedBrowserContext({ origin: "https://evil.example", "sec-fetch-site": "cross-site" }), false);
+  assert.equal(trustedCorsOrigin({ origin: "http://localhost:4177" }, allowedOrigins), "http://localhost:4177");
+  assert.equal(trustedCorsOrigin({ origin: "http://localhost:4999" }, allowedOrigins), "");
+  assert.equal(trustedCorsOrigin({ origin: "https://evil.example" }, allowedOrigins), "");
+  assert.equal(hasTrustedBrowserContext({ referer: "tauri://localhost/" }, allowedOrigins), true);
+  assert.equal(hasTrustedBrowserContext({ origin: "http://localhost:4999", "sec-fetch-site": "same-site" }, allowedOrigins), false);
+});
+
+test("secure local proxy pairs once and rejects a different localhost origin", async () => {
+  const server = await listenSecureLocalServer({ port: 0 });
+  const address = server.address();
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  try {
+    const rejected = await fetch(`${baseUrl}/api/health`, {
+      method: "OPTIONS",
+      headers: { origin: "http://localhost:4999", "access-control-request-method": "GET" }
+    });
+    assert.equal(rejected.status, 403);
+
+    const accepted = await fetch(`${baseUrl}/api/health`, {
+      method: "OPTIONS",
+      headers: { origin: baseUrl, "access-control-request-method": "GET" }
+    });
+    assert.equal(accepted.status, 204);
+    assert.equal(accepted.headers.get("access-control-allow-origin"), baseUrl);
+
+    const token = server.bootstrapToken;
+    const paired = await fetch(`${baseUrl}/bootstrap`, {
+      method: "POST",
+      headers: { "x-schema-docs-bootstrap-token": token }
+    });
+    assert.equal(paired.status, 200);
+    const payload = await paired.json();
+    assert.equal(payload.ok, true);
+    assert.ok(payload.data.token);
+    assert.notEqual(server.bootstrapToken, token);
+
+    const replay = await fetch(`${baseUrl}/bootstrap`, {
+      method: "POST",
+      headers: { "x-schema-docs-bootstrap-token": token }
+    });
+    assert.equal(replay.status, 403);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
 
 test("public API payload validation rejects absolute and traversal export paths", () => {

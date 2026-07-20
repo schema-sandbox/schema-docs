@@ -37,8 +37,12 @@ function internalSocketPath() {
   return path.join(os.tmpdir(), `schema-docs-${suffix}.sock`);
 }
 
+function allowedBrowserOrigins(apiBaseUrl) {
+  return [apiBaseUrl, "tauri://localhost", "https://tauri.localhost", "http://tauri.localhost"];
+}
+
 function applyCorsHeaders(request, headers) {
-  const origin = trustedCorsOrigin(request.headers);
+  const origin = trustedCorsOrigin(request.headers, request.schemaDocsAllowedOrigins || []);
   if (origin) {
     headers["access-control-allow-origin"] = origin;
     headers.vary = "Origin";
@@ -65,68 +69,10 @@ function sendJson(request, response, statusCode, payload) {
   response.end(JSON.stringify(payload, null, 2));
 }
 
-function sendText(request, response, statusCode, contentType, body, options = {}) {
-  const headers = applyCommonSecurityHeaders(applyCorsHeaders(request, {
-    "content-type": contentType,
-    "cache-control": options.cacheControl || "no-store"
-  }), { staticAsset: options.staticAsset });
-  response.writeHead(statusCode, headers);
-  response.end(body);
-}
-
-function browserConfigScript({ apiBaseUrl, apiToken, assetToken }) {
-  return `(() => {
-  const apiBaseUrl = ${JSON.stringify(apiBaseUrl)};
-  const apiToken = ${JSON.stringify(apiToken)};
-  const assetToken = ${JSON.stringify(assetToken)};
-  const originalFetch = window.__SCHEMA_DOCS_ORIGINAL_FETCH__ || window.fetch.bind(window);
-  window.__SCHEMA_DOCS_ORIGINAL_FETCH__ = originalFetch;
-  window.SCHEMA_DOCS_API_BASE_URL = apiBaseUrl;
-  window.AI_DOC_EXCHANGE_TOKEN = assetToken;
-  if (window.__SCHEMA_DOCS_SECURE_FETCH_INSTALLED__) return;
-  window.__SCHEMA_DOCS_SECURE_FETCH_INSTALLED__ = true;
-  window.fetch = async (input, init = {}) => {
-    const rawUrl = input instanceof Request ? input.url : String(input);
-    let target;
-    try { target = new URL(rawUrl, window.location.href); } catch { return originalFetch(input, init); }
-    if (!["127.0.0.1", "localhost"].includes(target.hostname)) return originalFetch(input, init);
-    const base = new URL(apiBaseUrl);
-    target.protocol = base.protocol;
-    target.hostname = base.hostname;
-    target.port = base.port;
-    if (target.pathname === "/app-config.js") {
-      return new Response(
-        "window.SCHEMA_DOCS_API_BASE_URL=" + JSON.stringify(apiBaseUrl) + ";window.AI_DOC_EXCHANGE_TOKEN=" + JSON.stringify(assetToken) + ";",
-        { status: 200, headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" } }
-      );
-    }
-    const headers = new Headers(input instanceof Request ? input.headers : (init.headers || {}));
-    if (target.pathname === "/api/workspace-asset") {
-      target.searchParams.set("token", assetToken);
-      headers.delete("x-ai-doc-exchange-token");
-    } else if (target.pathname.startsWith("/api/") && target.pathname !== "/api/health") {
-      target.searchParams.delete("token");
-      headers.set("x-ai-doc-exchange-token", apiToken);
-    }
-    if (input instanceof Request) {
-      const method = init.method || input.method;
-      let body = init.body;
-      if (body === undefined && !["GET", "HEAD"].includes(method.toUpperCase())) body = await input.clone().blob();
-      return originalFetch(target.toString(), { ...init, method, headers, body, signal: init.signal || input.signal });
-    }
-    return originalFetch(target.toString(), { ...init, headers });
-  };
-})();\n`;
-}
-
-function canServeAppConfig(request) {
-  return isTrustedHostHeader(request.headers.host) && hasTrustedBrowserContext(request.headers);
-}
-
 function canUseAssetRoute(request, url, assetToken) {
   return url.searchParams.get("token") === assetToken
     && isTrustedHostHeader(request.headers.host)
-    && hasTrustedBrowserContext(request.headers);
+    && hasTrustedBrowserContext(request.headers, request.schemaDocsAllowedOrigins || []);
 }
 
 function filteredUpstreamHeaders(requestHeaders, bodyLength = null) {
@@ -272,18 +218,19 @@ export async function listenSecureLocalServer(options = {}) {
   let apiBaseUrl = options.apiBaseUrl || `http://${host}:${port}`;
   const publicServer = http.createServer(async (request, response) => {
     try {
+      request.schemaDocsAllowedOrigins = allowedBrowserOrigins(apiBaseUrl);
       if (!isTrustedHostHeader(request.headers.host)) {
         sendJson(request, response, 403, errorPayload(new HttpSecurityError(403, "untrusted_host", "Only loopback Host headers are accepted.")));
         return;
       }
       const url = new URL(request.url || "/", apiBaseUrl);
       const origin = request.headers.origin;
-      if (origin && !trustedCorsOrigin(request.headers)) {
+      if (origin && !trustedCorsOrigin(request.headers, request.schemaDocsAllowedOrigins)) {
         sendJson(request, response, 403, errorPayload(new HttpSecurityError(403, "untrusted_origin", "Cross-origin requests from non-local origins are blocked.")));
         return;
       }
       if (request.method === "OPTIONS") {
-        if (!trustedCorsOrigin(request.headers)) {
+        if (!trustedCorsOrigin(request.headers, request.schemaDocsAllowedOrigins)) {
           sendJson(request, response, 403, errorPayload(new HttpSecurityError(403, "untrusted_origin", "CORS preflight origin is not trusted.")));
           return;
         }
@@ -308,14 +255,6 @@ export async function listenSecureLocalServer(options = {}) {
           data: { apiBaseUrl, token: publicToken, assetToken }
         });
         options.onBootstrapToken?.({ apiBaseUrl, bootstrapToken, previousToken });
-        return;
-      }
-      if (url.pathname === "/app-config.js") {
-        if (!canServeAppConfig(request)) {
-          sendText(request, response, 403, "text/plain; charset=utf-8", "Forbidden");
-          return;
-        }
-        sendText(request, response, 200, "text/javascript; charset=utf-8", browserConfigScript({ apiBaseUrl, apiToken: publicToken, assetToken }));
         return;
       }
       if (url.pathname.startsWith("/api/")) {

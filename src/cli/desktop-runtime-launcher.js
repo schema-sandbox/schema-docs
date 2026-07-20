@@ -20,7 +20,10 @@ const fetchBlockedPorts = new Set([
 
 function emitBootstrapMarker({ apiBaseUrl, bootstrapToken }) {
   const encoded = Buffer.from(JSON.stringify({ baseUrl: apiBaseUrl, bootstrapToken }), "utf8").toString("base64url");
-  console.log(`SCHEMA_DOCS_BOOTSTRAP ${encoded}`);
+  // Keep stdout machine-readable for existing runtime diagnostics and smoke
+  // checks. The desktop bridge reads the one-time bootstrap marker from the
+  // separately captured stderr tail.
+  console.error(`SCHEMA_DOCS_BOOTSTRAP ${encoded}`);
 }
 
 async function tryListen(port) {
