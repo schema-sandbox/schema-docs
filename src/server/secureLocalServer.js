@@ -22,6 +22,7 @@ const ASSET_ROUTE = "/api/workspace-asset";
 const ALLOWED_REQUEST_HEADERS = [
   "content-type",
   API_TOKEN_HEADER,
+  BOOTSTRAP_TOKEN_HEADER,
   "x-schema-docs-workspace-path",
   "x-schema-docs-filename"
 ].join(",");
@@ -351,6 +352,7 @@ export async function listenSecureLocalServer(options = {}) {
       }
       await proxyBuffered({ request, response, socketPath, internalToken, url, body: Buffer.alloc(0) });
     } catch (error) {
+      if (error?.code === "request_too_large") request.resume();
       const status = error instanceof HttpSecurityError ? error.status : 500;
       if (!response.headersSent) sendJson(request, response, status, errorPayload(error));
       else response.destroy(error);
