@@ -138,7 +138,7 @@ ${nextActionRows.join("\n")}
 
 ## Tester Notes
 
-- **Recommended Installer**: Use the NSIS setup executable (\`schema-docs_0.1.1_x64-setup.exe\`) for ordinary public preview installation testing.
+- **Recommended Installer**: Use the NSIS setup executable (\`schema-docs_0.1.2_x64-setup.exe\`) for ordinary public preview installation testing.
 - **MSI vs NSIS Difference**: The NSIS installer (\`.exe\`) is designed for quick, user-scoped or machine-scoped desktop setup. The MSI package (\`.msi\`) is intended for enterprise managed installation via GPO or SCCM deployment.
 - **First Action After Install**: Run the installed Schema Docs application. Create a temporary workspace or choose an existing local directory using the native folder picker.
 - **Verify /api/health**: Navigate to \`http://127.0.0.1:4177/api/health\` in your local browser or query client to verify that the offline JS API server is running and healthy.
@@ -154,7 +154,7 @@ export async function buildReleaseArtifactIndex(options = {}) {
   const releaseReadiness = await buildReleaseReadiness({ mode });
 
   return {
-    targetVersion: "v0.1.1",
+    targetVersion: "v0.1.2",
     generatedBy: "npm run release-index",
     generatedAt: new Date().toISOString(),
     releaseMode: mode,

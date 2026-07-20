@@ -336,7 +336,7 @@ export async function runDesktopReleasePreflight(options = {}) {
   const strictPreview = await strictPreviewFromRecord(recordPath);
   await writeJson(files.strictPreview, strictPreview);
 
-  const releaseReadinessRecorded = releaseReadiness.releaseTarget === "v0.1.1" && typeof releaseReadiness.readyForPublicTag === "boolean";
+  const releaseReadinessRecorded = releaseReadiness.releaseTarget === "v0.1.2" && typeof releaseReadiness.readyForPublicTag === "boolean";
   const automatedHandoffReady = Boolean(releaseArtifacts.artifacts.some((artifact) => artifact.exists && artifact.sha256)
     && releaseReadinessRecorded
     && appSmokeCheck.ok
@@ -344,7 +344,7 @@ export async function runDesktopReleasePreflight(options = {}) {
     && bridgeSmoke.ok);
   const result = {
     ok: true,
-    releaseTarget: "v0.1.1",
+    releaseTarget: "v0.1.2",
     outDir,
     files,
     automatedHandoffReady,

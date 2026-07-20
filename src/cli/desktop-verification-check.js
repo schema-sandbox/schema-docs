@@ -74,7 +74,7 @@ const visibleUi = record.visibleUi ?? {};
 const releaseArtifacts = await buildReleaseArtifactManifest();
 
 const failures = [
-  record.releaseTarget !== "v0.1.1" && fail("release_target_mismatch", record.releaseTarget),
+  record.releaseTarget !== "v0.1.2" && fail("release_target_mismatch", record.releaseTarget),
   record.recordType !== "desktop-verification" && fail("record_type_mismatch", record.recordType),
   (!record.artifact || typeof record.artifact !== "object") && fail("artifact_missing", null),
   (!record.environment || typeof record.environment !== "object") && fail("environment_missing", null),
@@ -149,7 +149,7 @@ if (strict) {
 }
 
 const result = {
-  releaseTarget: "v0.1.1",
+  releaseTarget: "v0.1.2",
   strict,
   ok: failures.length === 0,
   recordPath,

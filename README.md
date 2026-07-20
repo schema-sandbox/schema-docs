@@ -1,4 +1,4 @@
-# Schema Docs (v0.1.1)
+# Schema Docs (v0.1.2)
 
 [Website](http://schemadocs.org/) | [Repository](https://github.com/schema-sandbox/schema-docs)
 
@@ -9,7 +9,7 @@
 [![Tests](https://img.shields.io/badge/tests-332%20passing%20%2F%201%20skipped-brightgreen)](#testing)
 [![License](https://img.shields.io/badge/license-MIT-blue)](#license)
 [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)](#installation)
-[![Version](https://img.shields.io/badge/version-v0.1.1--public--preview-orange)](#changelog)
+[![Version](https://img.shields.io/badge/version-v0.1.2--public--preview-orange)](#changelog)
 
 Schema Docs is for people who already feed documents into ChatGPT, Claude, Gemini, or private LLM workflows and want a safer intake layer before any content leaves the machine. It is not trying to replace Office; it protects the moment before a document becomes AI context.
 
@@ -105,8 +105,8 @@ AI Model  --or--  Exchange Package  --or--  Block (local evidence log)
 
 Download the latest release installer:
 
-- **NSIS setup**: `schema-docs_0.1.1_x64-setup.exe`
-- **MSI package**: `schema-docs_0.1.1_x64_en-US.msi`
+- **NSIS setup**: `schema-docs_0.1.2_x64-setup.exe`
+- **MSI package**: `schema-docs_0.1.2_x64_en-US.msi`
 
 The installed application opens directly as a normal Windows desktop app. It does not open a Command Prompt, PowerShell, Node.js, or other code window. `Start-Desktop-Client.bat` is retained only as a developer/test launcher and may display diagnostic output.
 

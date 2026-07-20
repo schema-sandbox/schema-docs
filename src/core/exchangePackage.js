@@ -224,7 +224,7 @@ conversionQuality: input.conversionQuality ?? [],
 aiSendGateSummaries: input.aiSendGateSummaries ?? [],
 evidenceHashes: input.evidenceHashes ?? [],
 knownLimits: input.knownLimits ?? [],
-createdByVersion: "0.1.1"
+createdByVersion: "0.1.2"
 };
 }
 async function renderPackageExport(markdown, format) {
@@ -461,7 +461,7 @@ export async function explainExchangePackage(workspacePath, packageRelativePath)
   policies: m.policies || {},
   files: filesSummary,
   valid: pkg.valid,
-  createdByVersion: m.createdByVersion || "0.1.1",
+  createdByVersion: m.createdByVersion || "0.1.2",
   aiExposureDescription: "AI will see the frontmatter metadata (title, model, source), the complete markdown content of document.md, and any query result tables.",
   sanitizationStatus: m.policies?.storesApiKey === false ? "Active (API keys and sensitive tokens redacted)" : "Inactive",
   rawVsMarkdownMapping: {

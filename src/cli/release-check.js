@@ -38,9 +38,9 @@ checks.push({
 });
 const desktopArtifacts = (await buildReleaseArtifactManifest()).artifacts;
 const githubReleaseArtifactPaths = new Set([
-  "release/windows/schema-docs_0.1.1_x64_en-US.msi",
-  "release/windows/schema-docs_0.1.1_x64-setup.exe",
-  "release/windows/schema-docs_0.1.1_x64-portable.zip"
+  "release/windows/schema-docs_0.1.2_x64_en-US.msi",
+  "release/windows/schema-docs_0.1.2_x64-setup.exe",
+  "release/windows/schema-docs_0.1.2_x64-portable.zip"
 ]);
 const githubReleaseArtifacts = desktopArtifacts.filter((artifact) => githubReleaseArtifactPaths.has(artifact.path));
 const existingGithubReleaseArtifactCount = githubReleaseArtifacts.reduce(
@@ -188,14 +188,14 @@ checks.push({
         || (
           existingGithubReleaseArtifactCount === githubReleaseArtifactPaths.size
           && githubReleaseArtifacts.every((artifact) => releaseDraftIncludesArtifact(
-            releaseDocTexts["docs/github-release-draft-v0.1.1.md"] ?? "",
+            releaseDocTexts["docs/github-release-draft-v0.1.2.md"] ?? "",
             artifact
           ))
         )
       )
   ),
   expected: {
-    docs: ["docs/github-release-draft-v0.1.1.md"],
+    docs: ["docs/github-release-draft-v0.1.2.md"],
     verifies: [
       "source checkout may contain zero release assets",
       "a partial release asset set fails",
@@ -293,7 +293,7 @@ checks.push(
 
 const result = {
   version: packageJson.version,
-  releaseTarget: "v0.1.1",
+  releaseTarget: "v0.1.2",
   automaticChecksPassed: checks.every((check) => check.ok),
   checks,
   manualGate,

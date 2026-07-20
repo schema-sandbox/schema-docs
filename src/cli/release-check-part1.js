@@ -105,7 +105,7 @@ export function getChecksPart1(context) {
         && desktopHandoffLabels.slice(0, 4).every((label) => readmeDoc.includes(label))
         && ["README.md", "docs/release-checklist.md", "docs/sample-fixture-checklist.md", "docs/v0.1.0-release-plan.md", "docs/v0.1.0-release-notes.md"]
           .every((doc) => releaseDocTexts[doc]?.includes(desktopFixtureCloseWriteCommand))
-        && readmeDoc.includes("# Schema Docs (v0.1.1)")
+        && readmeDoc.includes("# Schema Docs (v0.1.2)")
         && readmeDoc.includes("Windows public-preview package")
         && readmeDoc.includes("Public preview scope")
         && readmeDoc.includes("packaged Node runtime resource")
@@ -279,8 +279,8 @@ export function getChecksPart1(context) {
         packageJson.scripts?.["release-artifacts"] === "node src/cli/release-artifacts.js"
         && releaseArtifactsCli.includes("sha256File")
         && releaseArtifactsCli.includes("src-tauri/target/release/app.exe")
-        && releaseArtifactsCli.includes("schema-docs_0.1.1_x64_en-US.msi")
-        && releaseArtifactsCli.includes("schema-docs_0.1.1_x64-setup.exe")
+        && releaseArtifactsCli.includes("schema-docs_0.1.2_x64_en-US.msi")
+        && releaseArtifactsCli.includes("schema-docs_0.1.2_x64-setup.exe")
         && releaseArtifactsCli.includes("sha256")
       ),
       expected: {
@@ -454,7 +454,7 @@ export function getChecksPart1(context) {
         && desktopVerificationRecord.includes("writeFile")
         && desktopVerificationRecord.includes("Generated partial record")
         && desktopVerificationTemplate?.recordType === "desktop-verification"
-        && desktopVerificationTemplate?.releaseTarget === "v0.1.1"
+        && desktopVerificationTemplate?.releaseTarget === "v0.1.2"
         && desktopVerificationTemplate?.visibleUi?.desktopDiagnostics
         && desktopVerificationTemplate?.visibleUi?.firstWorkflow
         && desktopVerificationTemplate?.visibleUi?.workspacePicker

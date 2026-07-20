@@ -228,7 +228,7 @@ test("desktop-verification-fill creates a strict-checkable record from explicit 
   const actualHash = appArtifact?.sha256 || "95881102234c4bd0345b6d3ac39e89e1f9ae0bf89ea80e93d4e42786bd59a58d";
   const actualBytes = appArtifact?.bytes || 8725504;
   await writeFile(recordPath, JSON.stringify({
-    releaseTarget: "v0.1.1",
+    releaseTarget: "v0.1.2",
     recordType: "desktop-verification",
     artifact: {
       path: "src-tauri/target/release/app.exe",
@@ -378,7 +378,7 @@ test("desktop-verification-fill can fill visible UI evidence one step at a time"
   const actualHash = appArtifact?.sha256 || "95881102234c4bd0345b6d3ac39e89e1f9ae0bf89ea80e93d4e42786bd59a58d";
   const actualBytes = appArtifact?.bytes || 8725504;
   await writeFile(recordPath, JSON.stringify({
-    releaseTarget: "v0.1.1",
+    releaseTarget: "v0.1.2",
     recordType: "desktop-verification",
     artifact: {
       path: "src-tauri/target/release/app.exe",

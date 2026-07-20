@@ -76,7 +76,7 @@ test("desktop GUI smokes pass a requested start port to the packaged app", async
 
 function desktopVerificationPassRecord({ bytes = 8725504, sha256 = "95881102234c4bd0345b6d3ac39e89e1f9ae0bf89ea80e93d4e42786bd59a58d" } = {}) {
   return {
-    releaseTarget: "v0.1.1",
+    releaseTarget: "v0.1.2",
     recordType: "desktop-verification",
     artifact: {
       path: "src-tauri/target/release/app.exe",

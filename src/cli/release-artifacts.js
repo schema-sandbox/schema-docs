@@ -6,9 +6,9 @@ import { pathToFileURL } from "node:url";
 const root = path.resolve(import.meta.dirname, "../..");
 const artifactPaths = [
   "src-tauri/target/release/app.exe",
-  "release/windows/schema-docs_0.1.1_x64_en-US.msi",
-  "release/windows/schema-docs_0.1.1_x64-setup.exe",
-  "release/windows/schema-docs_0.1.1_x64-portable.zip"
+  "release/windows/schema-docs_0.1.2_x64_en-US.msi",
+  "release/windows/schema-docs_0.1.2_x64-setup.exe",
+  "release/windows/schema-docs_0.1.2_x64-portable.zip"
 ];
 
 async function sha256File(filePath) {
@@ -42,7 +42,7 @@ export async function describeReleaseArtifact(relativePath) {
 
 export async function buildReleaseArtifactManifest() {
   return {
-    releaseTarget: "v0.1.1",
+    releaseTarget: "v0.1.2",
     generatedBy: "npm run release-artifacts",
     artifacts: await Promise.all(artifactPaths.map(describeReleaseArtifact))
   };

@@ -58,7 +58,7 @@ function fixtureBlockingItems(fixtureResult) {
 function buildNextActions({ releaseCheck, fixtureStrict }) {
   const actions = [];
   if (releaseCheck.result?.automaticChecksPassed !== true) {
-    actions.push("Fix failing automatic release-check items before preparing a public v0.1.1 tag.");
+    actions.push("Fix failing automatic release-check items before preparing a public v0.1.2 tag.");
   }
 
   const blockingItems = fixtureBlockingItems(fixtureStrict.result);
@@ -73,7 +73,7 @@ function buildNextActions({ releaseCheck, fixtureStrict }) {
   }
 
   if (fixtureStrict.result?.ok !== true && blockingItems.length === 0) {
-    actions.push("Fix fixture-check --strict failures before preparing a public v0.1.1 tag.");
+    actions.push("Fix fixture-check --strict failures before preparing a public v0.1.2 tag.");
   }
 
   return actions;
@@ -186,7 +186,7 @@ export async function buildReleaseReadiness(options = {}) {
   }
 
   return {
-    releaseTarget: "v0.1.1",
+    releaseTarget: "v0.1.2",
     releaseMode: mode,
     readyForPublicTag,
     automaticChecksPassed,

@@ -1,6 +1,6 @@
 {
   "name": "ai-document-exchange",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "description": "Local-first AI document intake layer for Office, PDF, spreadsheet, Markdown, and API workflows.",

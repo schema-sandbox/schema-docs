@@ -85,7 +85,7 @@ detail.sourcePath = ds.sourcePath ? `[REDACTED_PATH_HASH_${hashString(ds.sourceP
 return detail;
 });
 const feedbackData = {
-appVersion: "0.1.1",
+appVersion: "0.1.2",
 generatedAt: new Date().toISOString(),
 redacted: redact,
 systemInfo: {

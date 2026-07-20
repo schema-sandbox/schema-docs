@@ -8,8 +8,8 @@ Expected local artifacts after `npm run desktop:build`:
 
 - `src-tauri/target/release/app.exe`
 - `src-tauri/target/release/runtime/` (must remain beside the build-tree `app.exe`)
-- `src-tauri/target/release/bundle/msi/schema-docs_0.1.1_x64_en-US.msi`
-- `src-tauri/target/release/bundle/nsis/schema-docs_0.1.1_x64-setup.exe`
+- `src-tauri/target/release/bundle/msi/schema-docs_0.1.2_x64_en-US.msi`
+- `src-tauri/target/release/bundle/nsis/schema-docs_0.1.2_x64-setup.exe`
 
 After `npm run desktop:build`, run `npm run release:windows:prepare`. This separate step does not build implicitly: it validates the build-tree executable, sibling runtime (including bundled Node and public UI libraries), installers, version agreement, and release documents before atomically producing the MSI, NSIS installer, portable ZIP, and LF-formatted `release/windows/SHA256SUMS.txt`. If preparation fails, it cleans its unique temporary staging directory and leaves the previous release assets unchanged.
 
