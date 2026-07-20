@@ -27,9 +27,9 @@ Upload these four files from `release/windows` after the final build:
 
 | Artifact | Size | SHA-256 |
 |---|---:|---|
-| `schema-docs_0.1.2_x64-setup.exe` | 25,361,421 bytes | `04b0fc994aa3f33c35a0e94bb9cbaff5b98215fa7f86d070bf651b3877a3d245` |
-| `schema-docs_0.1.2_x64_en-US.msi` | 37,193,010 bytes | `8b523b4d4cebc5dcd7c8a373fba9ced37da35d300a5c323ff7e839e03a44a5f7` |
-| `schema-docs_0.1.2_x64-portable.zip` | 37,029,955 bytes | `dffd7d193284ed1c58cf7b1652aeee3118e2d8cb93e6c73cf8e18eb4cbe6f70b` |
+| `schema-docs_0.1.2_x64-setup.exe` | 25,365,648 bytes | `206df6a5fd47c79410281bedfcf0ff4cdc951502da6f964d8091229cf5b60082` |
+| `schema-docs_0.1.2_x64_en-US.msi` | 37,197,106 bytes | `2467757f6b14d178ffe580f38f02094822879989ef83fe5bf22f642bd3be80b1` |
+| `schema-docs_0.1.2_x64-portable.zip` | 37,029,954 bytes | `a2f428931862d80a64428b13b7a094fdfddacd96144abbab7e92a56ff96e3e68` |
 
 ## Verification
 
