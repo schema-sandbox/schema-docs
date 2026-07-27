@@ -23,7 +23,7 @@ export const requiredDocs = [
   "docs/sample-scenarios.md",
   "docs/real-sample-regression.md",
   "docs/public-preview-sample-report.md",
-  "docs/github-release-draft-v0.1.2.md",
+  "docs/github-release-draft-v0.1.3.md",
   "docs/developer-quickstart.md",
   "docs/tester-onboarding.md"
 ];
@@ -38,9 +38,9 @@ export const desktopHandoffLabels = [
 ];
 
 export const expectedTestSummary = {
-  badge: "tests-332%20passing%20%2F%201%20skipped",
-  readme: "333 automated",
-  docs: "333 tests, 332 pass, 1 skipped"
+  badge: "tests-380%20passing%20%2F%201%20skipped",
+  readme: "381 automated",
+  docs: "381 tests, 380 pass, 1 skipped"
 };
 
 export const requiredScripts = [

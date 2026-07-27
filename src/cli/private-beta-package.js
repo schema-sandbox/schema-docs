@@ -166,7 +166,7 @@ export async function buildPrivateBetaPackageReport(options = {}) {
   const decision = buildDecision({ readiness, artifacts, mode });
 
   return {
-    releaseTarget: "v0.1.2",
+    releaseTarget: "v0.1.3",
     generatedBy,
     generatedAt: new Date().toISOString(),
     releaseMode: mode,

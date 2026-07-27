@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { cp, copyFile, link, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -8,6 +9,7 @@ import {
   desktopAppSmokePath,
   desktopBridgeSmokePath,
   desktopFixtureClosePath,
+  desktopRuntimeCheckPath,
   desktopVerificationCheckPath,
   desktopVerificationRecordPath,
   desktopWorkflowSmokePath,
@@ -64,6 +66,35 @@ async function rejectCliJson(scriptPath, args) {
   throw new Error(`Expected ${path.basename(scriptPath)} to fail.`);
 }
 
+test("desktop runtime check rejects a stale service from an older release", async () => {
+  const packageJson = JSON.parse(await readFile(path.join(projectRoot, "package.json"), "utf8"));
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({
+      ok: true,
+      data: {
+        service: "schema-docs-local-api",
+        version: "0.1.2"
+      }
+    }));
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  try {
+    const address = server.address();
+    const result = await rejectCliJson(desktopRuntimeCheckPath, [
+      `http://127.0.0.1:${address.port}`
+    ]);
+    assert.equal(result.ok, false);
+    assert.equal(result.expectedVersion, packageJson.version);
+    assert.equal(result.actualVersion, "0.1.2");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test("desktop GUI smokes pass a requested start port to the packaged app", async () => {
   for (const relativePath of ["src/cli/desktop-app-smoke.js", "src/cli/desktop-workflow-smoke.js"]) {
     const source = await readFile(path.join(projectRoot, relativePath), "utf8");
@@ -72,11 +103,17 @@ test("desktop GUI smokes pass a requested start port to the packaged app", async
   const rustSource = await readFile(path.join(projectRoot, "src-tauri/src/lib.rs"), "utf8");
   assert.match(rustSource, /std::env::var\("SCHEMA_DOCS_DESKTOP_PORT"\)/);
   assert.match(rustSource, /\.env\("SCHEMA_DOCS_DESKTOP_PORT", &desktop_port\)/);
+  assert.match(rustSource, /struct DesktopSaveAuthorizations\(Mutex<HashSet<PathBuf>>\)/);
+  assert.match(rustSource, /fn finalize_authorized_export\(/);
+  assert.match(rustSource, /fn read_authorized_markdown_file\(/);
+  assert.match(rustSource, /fn save_authorized_markdown_file\(/);
+  assert.match(rustSource, /DesktopMarkdownAuthorizations/);
+  assert.match(rustSource, /Only files created in the protected export staging folder can leave the workspace/);
 });
 
 function desktopVerificationPassRecord({ bytes = 8725504, sha256 = "95881102234c4bd0345b6d3ac39e89e1f9ae0bf89ea80e93d4e42786bd59a58d" } = {}) {
   return {
-    releaseTarget: "v0.1.2",
+    releaseTarget: "v0.1.3",
     recordType: "desktop-verification",
     artifact: {
       path: "src-tauri/target/release/app.exe",

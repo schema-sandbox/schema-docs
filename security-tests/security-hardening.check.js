@@ -130,6 +130,52 @@ test("secure local proxy pairs once and rejects a different localhost origin", a
   }
 });
 
+test("secure local proxy serves only the static desktop bootstrap script", async () => {
+  const server = await listenSecureLocalServer({ port: 0 });
+  const address = server.address();
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  try {
+    const response = await fetch(`${baseUrl}/app-config.js`);
+    const script = await response.text();
+    assert.equal(response.status, 200);
+    assert.match(script, /desktop-bootstrap-pending/);
+    assert.doesNotMatch(script, /schema-docs-internal/);
+    assert.doesNotMatch(script, new RegExp(server.localToken));
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("secure local proxy accepts a bounded medium-size document upload without stalling", async () => {
+  const server = await listenSecureLocalServer({ port: 0 });
+  const address = server.address();
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const workspacePath = await tempDir("schema-secure-upload-");
+  try {
+    const paired = await fetch(`${baseUrl}/bootstrap`, {
+      method: "POST",
+      headers: { "x-schema-docs-bootstrap-token": server.bootstrapToken }
+    });
+    const bootstrap = await paired.json();
+    const payload = Buffer.alloc(512 * 1024, 0x61);
+    const response = await fetch(`${baseUrl}/api/import-upload?workspacePath=${encodeURIComponent(workspacePath)}&filename=medium-note.txt`, {
+      method: "POST",
+      headers: {
+        "x-ai-doc-exchange-token": bootstrap.data.token,
+        "x-schema-docs-workspace-path": workspacePath,
+        "x-schema-docs-filename": "medium-note.txt"
+      },
+      body: payload,
+      signal: AbortSignal.timeout(5000)
+    });
+    const result = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(result.ok, true);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test("public API payload validation rejects absolute and traversal export paths", () => {
   for (const outputRelativePath of ["/tmp/out.md", "C:\\temp\\out.md", "../out.md", "exports/../../out.md"]) {
     assert.throws(

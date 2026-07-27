@@ -1,4 +1,4 @@
-# Schema Docs (v0.1.2)
+# Schema Docs (v0.1.3)
 
 [Website](http://schemadocs.org/) | [Repository](https://github.com/schema-sandbox/schema-docs)
 
@@ -6,10 +6,10 @@
 >
 > Import Word, PDF, Excel, CSV, or Markdown; mask PII locally; trim the context; block unsafe sends; and export a verifiable SDXP exchange package.
 
-[![Tests](https://img.shields.io/badge/tests-332%20passing%20%2F%201%20skipped-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-380%20passing%20%2F%201%20skipped-brightgreen)](#testing)
 [![License](https://img.shields.io/badge/license-MIT-blue)](#license)
 [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)](#installation)
-[![Version](https://img.shields.io/badge/version-v0.1.2--public--preview-orange)](#changelog)
+[![Version](https://img.shields.io/badge/version-v0.1.3--public--preview-orange)](#changelog)
 
 Schema Docs is for people who already feed documents into ChatGPT, Claude, Gemini, or private LLM workflows and want a safer intake layer before any content leaves the machine. It is not trying to replace Office; it protects the moment before a document becomes AI context.
 
@@ -105,8 +105,8 @@ AI Model  --or--  Exchange Package  --or--  Block (local evidence log)
 
 Download the latest release installer:
 
-- **NSIS setup**: `schema-docs_0.1.2_x64-setup.exe`
-- **MSI package**: `schema-docs_0.1.2_x64_en-US.msi`
+- **NSIS setup**: `schema-docs_0.1.3_x64-setup.exe`
+- **MSI package**: `schema-docs_0.1.3_x64_en-US.msi`
 
 The installed application opens directly as a normal Windows desktop app. It does not open a Command Prompt, PowerShell, Node.js, or other code window. `Start-Desktop-Client.bat` is retained only as a developer/test launcher and may display diagnostic output.
 
@@ -274,7 +274,7 @@ src/
 public/                 - Web UI, vanilla JS ES modules, no bundler
 src-tauri/              - Tauri desktop shell, Rust and Cargo
 docs/                   - Protocol specs, known limits, release docs
-test/                   - 333 automated tests
+test/                   - 381 automated tests
 ```
 **Zero installed npm runtime dependencies**: the core uses Node.js built-ins plus bundled offline assets. Styled PDF export invokes a locally installed Edge or Chromium renderer.
 
@@ -283,7 +283,7 @@ test/                   - 333 automated tests
 ## Testing
 
 ```bash
-npm test                         # 333 automated tests at the source release audit: 332 pass, 1 manual external-sync scenario skipped
+npm test                         # 381 automated tests at the source release audit: 380 pass, 1 manual external-sync scenario skipped
 npm run release:public-preview   # One-command public-preview gate and handoff refresh
 npm run rc-check                 # Full public-preview RC preflight gate
 npm run public-preview-package -- --json  # Public-preview installer handoff report

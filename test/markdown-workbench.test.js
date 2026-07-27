@@ -24,6 +24,19 @@ function createRenderer(options = {}) {
     localApiBaseUrl: () => "http://127.0.0.1:4177"
   })._test;
 }
+
+test("merged export removes the complete generated segment header, including its period", async () => {
+  const appSource = await readFile(path.join(projectRoot, "public", "app.js"), "utf8");
+  assert.match(appSource, /Human Markdown segment \\d\+\\\/\\d\+\\\.\?/);
+  const header = "> Human Markdown segment 1/31.\n> Source line range: 1-12\n\nBody";
+  const stripped = header
+    .replace(/^>\s*Human Markdown segment \d+\/\d+\.?\s*\r?\n?/im, "")
+    .replace(/^>\s*Source line range:\s*[^\r\n]*\r?\n?/im, "")
+    .replace(/^\s+/, "")
+    .trimEnd();
+  assert.equal(stripped, "Body");
+});
+
 test("Markdown workbench renders Obsidian-style reading affordances", () => {
   const renderer = createRenderer();
   const html = renderer.markdownToReadableHtml(`---
@@ -101,8 +114,26 @@ test("PDF fallback formulas are marked for document-like visual blending", () =>
   const html = createRenderer({ workspacePath: "D:\\workspace" }).markdownToReadableHtml(
     "![Formula preserved from PDF page 1](<../assets/paper.pdf/page-000001-formula-001.png>)"
   );
-  assert.match(html, /class="workspace-asset-image pdf-formula-image"/);
+  assert.match(html, /<figure class="markdown-image-block"/);
+  assert.match(html, /class="workspace-asset-image pdf-formula-image pdf-formula-block"/);
+  assert.doesNotMatch(html, /<p[^>]*><img/);
   delete global.window;
+});
+
+test("PDF inline formula fallbacks remain in the surrounding text line", () => {
+  global.window = { AI_DOC_EXCHANGE_TOKEN: "token-123" };
+  const html = createRenderer({ workspacePath: "D:\\workspace" }).markdownToReadableHtml(
+    "The result is ![Inline formula preserved from PDF page 1](<../assets/paper.pdf/page-000001-formula-001.png>) for every input."
+  );
+  assert.match(html, /<p[^>]*>The result is <img[^>]*pdf-formula-inline/);
+  assert.doesNotMatch(html, /<figure class="markdown-image-block"/);
+  delete global.window;
+});
+
+test("PDF absolute-value notation is not rendered as a Markdown table", () => {
+  const html = createRenderer().markdownToReadableHtml("|DK|");
+  assert.match(html, /<p[^>]*>\|DK\|<\/p>/);
+  assert.doesNotMatch(html, /markdown-table-scroll/);
 });
 test("Markdown workbench recognizes PPTX slide documents for dual-layer reading", () => {
   const renderer = createRenderer();
@@ -180,6 +211,28 @@ test("merged exports share a sequential queue and request non-overwriting output
   assert.match(source, /mergedExportQueue\.catch\(\(\) => \{\}\)\.then\(\(\) => exportMergedNote\(format\)\)/);
   assert.match(source, /autoRename: true/);
   assert.match(source, /avoidOverwrite: true/);
+  assert.match(source, /function protectedExportStagePath\(format, requestedPath = ""\)/);
+  assert.match(source, /tauriInvoke\("finalize_authorized_export"/);
+  assert.match(source, /result = await exportMarkdownToDestination\(\{\s*relativePath: tempMdPath,\s*outputRelativePath: finalExportPath,/);
+});
+test("newly imported records remain selected so segmented navigation and merged export render", async () => {
+  const source = await readFile(path.join(projectRoot, "public", "app.js"), "utf8");
+  const workflow = source.slice(
+    source.indexOf("async function selectAndPrepareImportedRecord"),
+    source.indexOf("async function handleMarkdownImportFile")
+  );
+  assert.match(workflow, /state\.currentRecord = selected;\s*state\.selectedRecord = selected;/);
+  assert.match(workflow, /state\.currentRecord = doc;\s*state\.selectedRecord = doc;/);
+});
+test("selecting a document history record refreshes the active record and segment banner", async () => {
+  const source = await readFile(path.join(projectRoot, "public", "manifestPanel.js"), "utf8");
+  const workflow = source.slice(
+    source.indexOf("async function selectRecordForWorkflow"),
+    source.indexOf("async function prepareAiForRecord")
+  );
+  assert.match(workflow, /state\.currentRecord = record;\s*state\.selectedRecord = record;/);
+  assert.match(workflow, /window\.renderMarkdownReadView\?\.\(\);/);
+  assert.match(workflow, /window\.setMarkdownViewMode\?\.\("edit"\);/);
 });
 test("Markdown inline rendering keeps more than one hundred formulas and code spans in order", () => {
   const renderer = createRenderer();
@@ -266,4 +319,17 @@ test("Markdown workbench renders readable segment links as internal file actions
     renderer.normalizeRelativeMarkdownPath("outputs/readable/large.readable.index.md", "./large.readable_1.md"),
     "outputs/readable/large.readable_1.md"
   );
+});
+
+test("segment navigation clears a stale banner outside a segmented document", async () => {
+  const source = await readFile(path.join(projectRoot, "public", "markdownWorkbenchPanel.js"), "utf8");
+  assert.match(source, /if \(!state\.selectedRecord\) \{[\s\S]*?banner\.classList\.add\("hidden"\);[\s\S]*?banner\.replaceChildren\(\);/);
+  assert.match(source, /if \(!segmentsObj \|\| !segmentsObj\.segmented \|\| !segmentsObj\.segments\?\.length\) \{[\s\S]*?banner\.replaceChildren\(\);/);
+});
+
+test("external Markdown open and save use native dialog authorization in desktop mode", async () => {
+  const source = await readFile(path.join(projectRoot, "public", "app.js"), "utf8");
+  assert.match(source, /tauriInvoke\("read_authorized_markdown_file", \{ sourcePath \}\)/);
+  assert.match(source, /tauriInvoke\("save_authorized_markdown_file", \{ sourcePath, content \}\)/);
+  assert.match(source, /const content = await readExternalMarkdownFile\(selected\);/);
 });

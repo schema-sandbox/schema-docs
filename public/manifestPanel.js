@@ -171,15 +171,19 @@ select.style.color = "var(--text-color, #e7e5e4)";
 select.style.marginBottom = "20px";
 const options = [
 { value: "auto", label: "auto" },
+{ value: "pdfplumber", label: t("Layout extraction (fast, readable formulas stay editable)") },
+{ value: "built-in", label: "built-in" }
+];
+if (state.advancedToolsVisible) {
+options.push(
 { value: "scientific", label: t("Scientific refinement (editable formulas, slow)") },
 { value: "marker", label: t("Marker full-page reconstruction (slowest)") },
-{ value: "pdfplumber", label: t("Layout extraction (fast, uncertain formulas stay as images)") },
 { value: "ocr", label: "ocr" },
-{ value: "built-in", label: "built-in" },
 { value: "pdftotext", label: "pdftotext" },
 { value: "mutool", label: "mutool" },
 { value: "pandoc", label: "pandoc" }
-];
+);
+}
 options.forEach(opt => {
 const o = document.createElement("option");
 o.value = opt.value;
@@ -325,6 +329,8 @@ showAlert("success", "Exchange package created and trust report loaded.");
 return result;
 }
 async function selectRecordForWorkflow(record, kind) {
+state.currentRecord = record;
+state.selectedRecord = record;
 $("recordId").value = record.id;
 if (kind === "document" && record.status === "ready" && record.outputMarkdownPath) {
 const relPath = relativeHumanMarkdownPath(record);
@@ -348,6 +354,10 @@ $("noteContent").value = noteContent;
 showEditorWarningsForRecord(record);
 } else {
 $("editorWarnings").classList.add("hidden");
+}
+if (kind === "document") {
+window.renderMarkdownReadView?.();
+window.setMarkdownViewMode?.("edit");
 }
 return { selectedRecordId: record.id, kind };
 }

@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fs,
     io::Write,
     path::PathBuf,
@@ -10,6 +11,8 @@ use serde_json::json;
 use tauri::{Emitter, Manager, RunEvent};
 
 struct DesktopRuntime(Mutex<Option<Child>>);
+struct DesktopSaveAuthorizations(Mutex<HashSet<PathBuf>>);
+struct DesktopMarkdownAuthorizations(Mutex<HashSet<PathBuf>>);
 
 fn hidden_command<S: AsRef<std::ffi::OsStr>>(program: S) -> Command {
     let mut command = Command::new(program);
@@ -22,6 +25,9 @@ fn hidden_command<S: AsRef<std::ffi::OsStr>>(program: S) -> Command {
 }
 
 fn runtime_session_dir(app: &tauri::AppHandle) -> PathBuf {
+    if let Some(directory) = std::env::var_os("SCHEMA_DOCS_RUNTIME_SESSION_DIR") {
+        return PathBuf::from(directory);
+    }
     app.path()
         .app_data_dir()
         .map(|dir| dir.join("runtime-session"))
@@ -113,7 +119,9 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
 }
 
 #[tauri::command]
-fn select_markdown_file_path() -> Result<Option<String>, String> {
+fn select_markdown_file_path(
+    authorizations: tauri::State<DesktopMarkdownAuthorizations>,
+) -> Result<Option<String>, String> {
     if !cfg!(windows) {
         return Err(
             "Native Markdown file picker is only implemented for Windows desktop builds."
@@ -158,8 +166,72 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     if selected.is_empty() {
         Ok(None)
     } else {
-        Ok(Some(selected))
+        let selected_path = fs::canonicalize(&selected)
+            .map_err(|error| format!("Failed to verify selected Markdown file: {error}"))?;
+        let is_markdown = selected_path
+            .extension()
+            .and_then(|value| value.to_str())
+            .map(|value| value.eq_ignore_ascii_case("md") || value.eq_ignore_ascii_case("markdown"))
+            .unwrap_or(false);
+        if !selected_path.is_file() || !is_markdown {
+            return Err("The selected path must be an existing Markdown file.".to_string());
+        }
+        authorizations
+            .0
+            .lock()
+            .map_err(|_| "Desktop Markdown authorization state is unavailable.".to_string())?
+            .insert(selected_path.clone());
+        Ok(Some(selected_path.to_string_lossy().to_string()))
     }
+}
+
+fn authorized_markdown_path(
+    source_path: &str,
+    authorizations: &tauri::State<DesktopMarkdownAuthorizations>,
+) -> Result<PathBuf, String> {
+    let source = fs::canonicalize(source_path)
+        .map_err(|error| format!("Failed to verify Markdown file: {error}"))?;
+    let is_markdown = source
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.eq_ignore_ascii_case("md") || value.eq_ignore_ascii_case("markdown"))
+        .unwrap_or(false);
+    if !source.is_file() || !is_markdown {
+        return Err("The selected path must be an existing Markdown file.".to_string());
+    }
+    let authorized = authorizations
+        .0
+        .lock()
+        .map_err(|_| "Desktop Markdown authorization state is unavailable.".to_string())?
+        .contains(&source);
+    if !authorized {
+        return Err(
+            "This Markdown file was not authorized by the desktop open dialog.".to_string(),
+        );
+    }
+    Ok(source)
+}
+
+#[tauri::command]
+fn read_authorized_markdown_file(
+    source_path: String,
+    authorizations: tauri::State<DesktopMarkdownAuthorizations>,
+) -> Result<String, String> {
+    let source = authorized_markdown_path(&source_path, &authorizations)?;
+    fs::read_to_string(source)
+        .map_err(|error| format!("Failed to read Markdown file as UTF-8: {error}"))
+}
+
+#[tauri::command]
+fn save_authorized_markdown_file(
+    source_path: String,
+    content: String,
+    authorizations: tauri::State<DesktopMarkdownAuthorizations>,
+) -> Result<String, String> {
+    let source = authorized_markdown_path(&source_path, &authorizations)?;
+    fs::write(&source, content)
+        .map_err(|error| format!("Failed to save authorized Markdown file: {error}"))?;
+    Ok(source.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -168,6 +240,7 @@ fn select_save_file_path(
     filter_name: String,
     extensions: Vec<String>,
     auto_rename: Option<bool>,
+    authorizations: tauri::State<DesktopSaveAuthorizations>,
 ) -> Result<Option<String>, String> {
     if !cfg!(windows) {
         return Err(
@@ -246,6 +319,11 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {{
     } else {
         let path = PathBuf::from(selected);
         if !auto_rename.unwrap_or(false) || !path.exists() {
+            authorizations
+                .0
+                .lock()
+                .map_err(|_| "Desktop save authorization state is unavailable.".to_string())?
+                .insert(path.clone());
             return Ok(Some(path.to_string_lossy().to_string()));
         }
         let parent = path.parent().unwrap_or_else(|| std::path::Path::new(""));
@@ -261,11 +339,116 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {{
             };
             let candidate = parent.join(file_name);
             if !candidate.exists() {
+                authorizations
+                    .0
+                    .lock()
+                    .map_err(|_| "Desktop save authorization state is unavailable.".to_string())?
+                    .insert(candidate.clone());
                 return Ok(Some(candidate.to_string_lossy().to_string()));
             }
         }
         unreachable!()
     }
+}
+
+fn copy_directory_recursive(
+    source: &std::path::Path,
+    destination: &std::path::Path,
+) -> Result<(), String> {
+    fs::create_dir_all(destination)
+        .map_err(|error| format!("Failed to create export asset folder: {error}"))?;
+    for entry in fs::read_dir(source)
+        .map_err(|error| format!("Failed to read staged export assets: {error}"))?
+    {
+        let entry =
+            entry.map_err(|error| format!("Failed to read staged export asset: {error}"))?;
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+        if source_path.is_dir() {
+            copy_directory_recursive(&source_path, &destination_path)?;
+        } else {
+            fs::copy(&source_path, &destination_path)
+                .map_err(|error| format!("Failed to copy export asset: {error}"))?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn finalize_authorized_export(
+    workspace_path: String,
+    source_path: String,
+    destination_path: String,
+    authorizations: tauri::State<DesktopSaveAuthorizations>,
+) -> Result<String, String> {
+    let destination = PathBuf::from(&destination_path);
+    let authorized = authorizations
+        .0
+        .lock()
+        .map_err(|_| "Desktop save authorization state is unavailable.".to_string())?
+        .remove(&destination);
+    if !authorized {
+        return Err(
+            "This export destination was not authorized by the desktop save dialog.".to_string(),
+        );
+    }
+
+    let workspace = fs::canonicalize(&workspace_path)
+        .map_err(|error| format!("Failed to verify the workspace path: {error}"))?;
+    let source = fs::canonicalize(&source_path)
+        .map_err(|error| format!("Failed to verify the staged export: {error}"))?;
+    let relative = source
+        .strip_prefix(&workspace)
+        .map_err(|_| "The staged export is outside the active workspace.".to_string())?;
+    if relative
+        .components()
+        .next()
+        .and_then(|part| part.as_os_str().to_str())
+        != Some(".schema-docs-export-staging")
+    {
+        return Err(
+            "Only files created in the protected export staging folder can leave the workspace."
+                .to_string(),
+        );
+    }
+    if source.extension() != destination.extension() {
+        return Err(
+            "The authorized destination extension does not match the staged export.".to_string(),
+        );
+    }
+
+    fs::copy(&source, &destination)
+        .map_err(|error| format!("Failed to write the authorized export: {error}"))?;
+
+    if source
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.eq_ignore_ascii_case("md"))
+        .unwrap_or(false)
+    {
+        let source_assets = source.with_file_name(format!(
+            "{}.assets",
+            source
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or("document")
+        ));
+        if source_assets.is_dir() {
+            let destination_assets = destination.with_file_name(format!(
+                "{}.assets",
+                destination
+                    .file_stem()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("document")
+            ));
+            copy_directory_recursive(&source_assets, &destination_assets)?;
+            fs::remove_dir_all(&source_assets)
+                .map_err(|error| format!("Failed to clean staged export assets: {error}"))?;
+        }
+    }
+    fs::remove_file(&source)
+        .map_err(|error| format!("Failed to clean the staged export: {error}"))?;
+    Ok(destination.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -584,8 +767,8 @@ fn spawn_desktop_runtime(app: &tauri::App) -> Option<Child> {
 
     let runtime_stdout = runtime_stdio(&session_dir, "runtime-stdout.log");
     let runtime_stderr = runtime_stdio(&session_dir, "runtime-stderr.log");
-    let desktop_port = std::env::var("SCHEMA_DOCS_DESKTOP_PORT")
-        .unwrap_or_else(|_| "4177".to_string());
+    let desktop_port =
+        std::env::var("SCHEMA_DOCS_DESKTOP_PORT").unwrap_or_else(|_| "4177".to_string());
 
     let bundled_node = runtime_root.join("node.exe");
     let node_cmd = if bundled_node.exists() {
@@ -647,6 +830,8 @@ pub fn run() {
                 )?;
             }
             app.manage(DesktopRuntime(Mutex::new(spawn_desktop_runtime(app))));
+            app.manage(DesktopSaveAuthorizations(Mutex::new(HashSet::new())));
+            app.manage(DesktopMarkdownAuthorizations(Mutex::new(HashSet::new())));
 
             // Register Alt+Space & Ctrl+Alt+A global hotkeys
             use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
@@ -661,7 +846,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             select_import_file_path,
             select_markdown_file_path,
+            read_authorized_markdown_file,
+            save_authorized_markdown_file,
             select_save_file_path,
+            finalize_authorized_export,
             select_import_directory_path,
             select_workspace_path,
             get_desktop_runtime_diagnostics,

@@ -12,7 +12,7 @@ import { docxDocumentXmlToMarkdown, docxMarkdownConverter } from "../src/adapter
 import { markdownToDocxBuffer } from "../src/adapters/markdownDocxExporter.js";
 import { markdownToPdfBuffer, pdfBufferToMarkdown, pdfMarkdownConverter } from "../src/adapters/pdfMarkdownConverter.js";
 import { runPdfExtractionPipeline } from "../src/adapters/pdfExtractorPipeline.js";
-import { rewriteMarkerLocalAssets } from "../src/adapters/pdfMarkerExtractor.js";
+import { extractPdfWithMarker, rewriteMarkerLocalAssets } from "../src/adapters/pdfMarkerExtractor.js";
 import { createAppService } from "../src/core/appService.js";
 import { deleteConversionAudit, listConversionAudits } from "../src/core/conversionAudits.js";
 import { exportMarkdownDocument } from "../src/core/documentExports.js";
@@ -415,6 +415,36 @@ test("pdf text layer extraction preserves lists and table-of-contents lines", as
   assert.match(markdown, /^- first bullet$/m);
   assert.match(markdown, /^- second bullet$/m);
   assert.match(markdown, /^1\. numbered item$/m);
+});
+test("pdf table-of-contents entries survive glyph-by-glyph dot leaders", async () => {
+  // A PDF text layer draws a dot leader one glyph at a time, so the run arrives
+  // as ". . . ." rather than "....". Numbered section titles also carry their own
+  // dot ("3.4 Linear ..."), and stray accents from the same baseline trail the
+  // page number. All three shapes appeared in a real 2000-page mathematics book.
+  const pdf = markdownToPdfBuffer([
+    "Contents",
+    "3.4 Linear Independence, Subspaces . . . . . . . . . . 70",
+    "A.3 Summary . . . . . . . . . . 2135",
+    "34.6 The Hodge -Operator . . . . . . . . . . 1215 *",
+    "Bibliography . . . . . . . . 2165"
+  ].join("\n"));
+  const markdown = await pdfBufferToMarkdown(pdf, "spaced-toc.pdf");
+  assert.match(markdown, /- 3\.4 Linear Independence, Subspaces \(p\. 70\)/);
+  assert.match(markdown, /- A\.3 Summary \(p\. 2135\)/);
+  assert.match(markdown, /- 34\.6 The Hodge -Operator \(p\. 1215\)/);
+  assert.match(markdown, /- Bibliography \(p\. 2165\)/);
+  // The leader itself must not survive into the entry.
+  assert.doesNotMatch(markdown, /\.\s\.\s\./);
+});
+test("ordinary prose ending in a period is never converted to a contents entry", async () => {
+  const pdf = markdownToPdfBuffer([
+    "Then SO(2) can be considered as a subgroup.",
+    "The value is 3.14159",
+    "See Figure 3.1."
+  ].join("\n"));
+  const markdown = await pdfBufferToMarkdown(pdf, "prose.pdf");
+  assert.doesNotMatch(markdown, /\(p\. /);
+  assert.match(markdown, /3\.14159/);
 });
 test("pdf text layer extraction promotes only credible headings and decodes printable octal text", async () => {
   const pdf = Buffer.from([
@@ -823,7 +853,10 @@ test("reuses unchanged Markdown extraction instead of reconverting the same PDF"
   assert.equal(repairedJob.status, "succeeded");
   assert.notEqual(repairedJob.output.cached, true);
   assert.match(await readFile(repairedJob.output.readableMarkdownPath, "utf8"), /Cache/);
-  const upgradedConverter = { ...pdfMarkdownConverter, cacheVersion: "2" };
+  const upgradedConverter = {
+    ...pdfMarkdownConverter,
+    cacheVersion: String(Number(pdfMarkdownConverter.cacheVersion || "1") + 1)
+  };
   const thirdJob = await convertDocumentToMarkdownAsJob(workspace, record.id, upgradedConverter);
   assert.equal(thirdJob.status, "succeeded");
   assert.notEqual(thirdJob.output.cached, true);
@@ -1033,7 +1066,8 @@ test("PDF visual placeholders become inline Markdown assets", () => {
     "<!-- pdf-image: page=12 index=1 file=page-000012-figure-000.png -->",
     "        <!-- pdf-formula: page=12 index=2 file=page-000012-formula-001.png -->",
     "<!-- pdf-table: page=12 index=4 file=page-000012-table-003.png -->",
-    "t=2.0<!-- pdf-formula: page=12 index=3 file=page-000012-formula-002.png -->tail"
+    "t=2.0<!-- pdf-formula: page=12 index=3 file=page-000012-formula-002.png -->tail",
+    "A<!-- pdf-formula: page=12 index=5 file=page-000012-formula-003.png mode=inline -->B"
   ].join("\n");
   const main = attachPdfImagesToMarkdown(source, "Physics Notes", false);
   const readable = attachPdfImagesToMarkdown(source, "Physics Notes", true);
@@ -1043,6 +1077,7 @@ test("PDF visual placeholders become inline Markdown assets", () => {
   assert.doesNotMatch(main, /^[ \t]{4,}!\[Formula preserved/gm);
   assert.doesNotMatch(main, /t=2\.0!\[Formula preserved/);
   assert.match(main, /t=2\.0\n\n!\[Formula preserved from PDF page 12\]\(<assets\/Physics Notes\.pdf\/page-000012-formula-002\.png>\)\n\ntail/);
+  assert.match(main, /A!\[Inline formula preserved from PDF page 12\]\(<assets\/Physics Notes\.pdf\/page-000012-formula-003\.png>\)B/);
   assert.match(main, /<assets\/Physics Notes\.pdf\/page-000012-figure-000\.png>/);
   assert.match(readable, /<\.\.\/assets\/Physics Notes\.pdf\/page-000012-formula-001\.png>/);
 });
@@ -1080,6 +1115,20 @@ test("PDF pipeline chooses layout-aware extraction when built-in formulas are da
   assert.match(result.markdown, /λ = 2π\/k/);
   assert.equal(result.attempts.find((attempt) => attempt.name === "pdfplumber").status, "success");
 });
+
+test("readable markdown splits decimal textbook table-of-contents entries", () => {
+  const readable = createReadableMarkdown([
+    "4 Matrices and Linear Maps 115 4.1 Representation of Linear Maps by Matrices . . . . . . . . . . 115 4.2 Composition of Linear Maps and Matrix Multiplication . . . . . . . . . . 120 4.3 Change of Basis Matrix . . . . . . . . . . . . . . . . . . . . . . . . . 126",
+    "5.1 Introduction to Signal Compression Using Haar Wavelets . . . . . . . . . . 143 5.2 Haar Matrices, Scaling Properties of Haar Wavelets . . . . . . . . . . . . . . 145"
+  ].join("\n"), {
+    sourceType: "pdf",
+    sourceName: "textbook.pdf"
+  });
+  assert.match(readable, /^\*\*4 Matrices and Linear Maps - 115\*\*$/m);
+  assert.match(readable, /^- 4\.2 Composition of Linear Maps and Matrix Multiplication - 120$/m);
+  assert.match(readable, /^- 5\.2 Haar Matrices, Scaling Properties of Haar Wavelets - 145$/m);
+});
+
 test("PDF scientific retry accepts refined layout Markdown and reports formula OCR", async () => {
   const workspace = await tempDir("pdf-scientific-choice-");
   const pdfPath = path.join(workspace, "science.pdf");
@@ -1097,6 +1146,27 @@ test("PDF scientific retry accepts refined layout Markdown and reports formula O
   assert.equal(result.extractorName, "scientific");
   assert.match(result.markdown, /\\frac\{x\}\{y\}/);
   assert.ok(result.warnings.some((warning) => warning.includes("1 of 1")));
+});
+
+test("PDF scientific retry keeps the canonical layout path for editable formulas", async () => {
+  const workspace = await tempDir("pdf-scientific-canonical-layout-");
+  const pdfPath = path.join(workspace, "textbook.pdf");
+  await writeFile(pdfPath, markdownToPdfBuffer("# Textbook\n\nBody text."));
+  const result = await runPdfExtractionPipeline(pdfPath, {
+    preferredExtractor: "scientific",
+    converter: { convert: async () => ({ markdown: "# Textbook\n\nReadable body text.", warnings: [] }) },
+    mockPdfLayoutAvailable: true,
+    mockPdfLayout: `# Textbook\n\n${String.raw`$$a^{\prime}\cdot a=e$$`}`,
+    mockPdftotextAvailable: true,
+    mockPdftotext: "Proposition 2.2. Let a0 be a left inverse of a.",
+    mockMutoolAvailable: false,
+    mockPandocAvailable: false,
+    mockOcrAvailable: false
+  });
+  assert.equal(result.extractorName, "scientific");
+  assert.equal(result.attempts.find((attempt) => attempt.name === "pdfplumber").status, "success");
+  assert.match(result.markdown, /a\^\{\\prime\}/);
+  assert.equal(result.attempts.some((attempt) => attempt.name === "pdftotext"), false);
 });
 
 test("PDF pipeline runs local OCR when a PDF has no readable text layer", async () => {
@@ -1176,6 +1246,81 @@ test("Marker image links remain valid after rich Markdown moves into the workspa
   assert.equal(rewritten, "![Figure](assets/doc-marker/book/images/figure%201.png)");
 });
 
+test("Marker runs its inline-math pass unless the caller opts out", async () => {
+  // A mathematics textbook is mostly inline math, which Marker leaves as plain
+  // text unless its inline pass is requested.  A stub records the real argument
+  // vector, which a mocked pipeline cannot verify.  It runs through the Node
+  // binary because execFile cannot launch a .cmd directly on Windows and a
+  // shell would requote the very arguments under test.
+  const dir = await mkdtemp(path.join(os.tmpdir(), "marker-args-"));
+  const argsLog = path.join(dir, "args.json");
+  const outDir = path.join(dir, "out");
+  await mkdir(path.join(outDir, "doc"), { recursive: true });
+  await writeFile(path.join(outDir, "doc", "doc.md"), "# Stub\n\n$$x=1$$\n");
+  const recorderPath = path.join(dir, "record.mjs");
+  await writeFile(
+    recorderPath,
+    'import { writeFile } from "node:fs/promises";\n'
+      + `await writeFile(${JSON.stringify(argsLog)}, JSON.stringify(process.argv.slice(2)), "utf8");`
+  );
+  const { extractPdfWithMarker } = await import("../src/adapters/pdfMarkerExtractor.js");
+  const detection = { available: true, command: process.execPath, args: [recorderPath], version: "stub" };
+  const readArgs = async () => JSON.parse(await readFile(argsLog, "utf8"));
+
+  await extractPdfWithMarker("book.pdf", { detection, outputDir: outDir });
+  const defaultArgs = await readArgs();
+  assert.ok(defaultArgs.includes("--redo_inline_math"), JSON.stringify(defaultArgs));
+  assert.ok(defaultArgs.includes("--output_format") && defaultArgs.includes("markdown"));
+  assert.ok(defaultArgs.includes("--paginate_output"));
+  // The extra model pass is expensive, so display-only callers may decline it.
+  await unlink(argsLog);
+  await extractPdfWithMarker("book.pdf", { detection, outputDir: outDir, inlineMath: false });
+  assert.ok(!(await readArgs()).includes("--redo_inline_math"));
+  // OCR stays opt-in: forcing it on a text-layer PDF is slow and lossy.
+  await unlink(argsLog);
+  await extractPdfWithMarker("book.pdf", { detection, outputDir: outDir, forceOcr: true });
+  const ocrArgs = await readArgs();
+  assert.ok(ocrArgs.includes("--force_ocr") && ocrArgs.includes("--redo_inline_math"));
+});
+
+test("Marker batches a book-length extraction when the page count is known", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "marker-batches-"));
+  const outDir = path.join(dir, "out");
+  const recorderPath = path.join(dir, "marker-stub.mjs");
+  await writeFile(recorderPath, [
+    'import { appendFile, mkdir, writeFile } from "node:fs/promises";',
+    'import path from "node:path";',
+    'const args = process.argv.slice(2);',
+    'const output = args[args.indexOf("--output_dir") + 1];',
+    'const range = args[args.indexOf("--page_range") + 1];',
+    'const target = path.join(output, "document", "document.md");',
+    'await mkdir(path.dirname(target), { recursive: true });',
+    'await appendFile(path.join(process.env.MARKER_STUB_LOG, "calls.txt"), `${range}\\n`, "utf8");',
+    'await writeFile(target, `# Batch ${range}\\n\\n$$x=1$$\\n`, "utf8");'
+  ].join("\n"), "utf8");
+  const result = await extractPdfWithMarker("book.pdf", {
+    detection: { available: true, command: process.execPath, args: [recorderPath], version: "stub" },
+    outputDir: outDir,
+    pageCount: 3,
+    batchSize: 2,
+    env: { ...process.env, MARKER_STUB_LOG: dir }
+  });
+  assert.equal(result.batchesCompleted, 2);
+  assert.equal(result.batchesTotal, 2);
+  assert.match(result.markdown, /# Batch 0-1/);
+  assert.match(result.markdown, /# Batch 2-2/);
+  assert.equal(result.equationCount, 2);
+  const resumed = await extractPdfWithMarker("book.pdf", {
+    detection: { available: true, command: process.execPath, args: [recorderPath], version: "stub" },
+    outputDir: outDir,
+    pageCount: 3,
+    batchSize: 2,
+    env: { ...process.env, MARKER_STUB_LOG: dir }
+  });
+  assert.equal(resumed.batchesCompleted, 2);
+  assert.equal((await readFile(path.join(dir, "calls.txt"), "utf8")).trim().split(/\r?\n/).length, 2);
+});
+
 test("preserves CJK paragraph spaces correctly when joining lines", () => {
   const cjkText = "我们正在\n进行测试。";
   const cjkResult = createReadableMarkdown(cjkText, { sourceType: "pdf", sourceName: "test.pdf" });
@@ -1239,4 +1384,33 @@ test("standardizes qualityStates classification correctly", async () => {
     []
   );
   assert.equal(report3.qualityState, "ocr_required");
+});
+
+test("formula semantic loss blocks AI intake even when body text is readable", async () => {
+  const workspace = await tempDir("formula-quality-gate-");
+  await openOrCreateWorkspace(workspace);
+  const { createQualityReport } = await import("../src/core/qualityReport.js");
+  const report = await createQualityReport(
+    workspace,
+    "doc_formula",
+    "math.pdf",
+    "pdf",
+    path.join(workspace, "math.md"),
+    "Readable prose around $a^{-1}$.",
+    {
+      confidence: "medium",
+      semanticLoss: {
+        formulaDamageLikely: true,
+        octalArtifacts: 0,
+        cidArtifacts: 12,
+        privateUseArtifacts: 3
+      }
+    },
+    []
+  );
+  assert.equal(report.qualityState, "formula_reconstruction_required");
+  assert.equal(report.whetherAiSendGateBlocked, true);
+  assert.ok(report.activeWarnings.includes("formulaDamageLikely"));
+  assert.ok(report.matchedKnownLimits.includes("pdf_formula_semantic_loss"));
+  assert.match(report.recommendedNextAction, /Marker full-page reconstruction/);
 });

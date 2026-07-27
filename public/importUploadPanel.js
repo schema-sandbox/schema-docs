@@ -30,8 +30,8 @@ try {
 const ext = file.name.split(".").pop().toLowerCase();
 const fileSize = Number(file.size || 0);
 const mb = fileSize / 1024 / 1024;
-const limit = ["csv", "xlsx", "xls"].includes(ext) ? 10 * 1024 * 1024 : 1024 * 1024 * 1024;
-if (fileSize > limit) throw new Error(`File is too large (${mb.toFixed(1)}MB). Limits: Datasets <10MB, documents <1024MB.`);
+const limit = ["csv", "xlsx", "xls"].includes(ext) ? 10 * 1024 * 1024 : 256 * 1024 * 1024;
+if (fileSize > limit) throw new Error(`File is too large (${mb.toFixed(1)}MB). Limits: Datasets <10MB, documents <256MB.`);
 if (typeof ensureWorkspace === "function") {
 await ensureWorkspace();
 }

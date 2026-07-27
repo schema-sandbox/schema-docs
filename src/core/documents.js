@@ -94,10 +94,12 @@ return { visualMapPath: jsonPath, visualAssetsIndexPath: indexPath, summary: vis
 export function attachPdfImagesToMarkdown(markdown, baseName, readable = false) {
 const root = readable ? "../assets" : "assets";
 const attached = String(markdown || "").replace(
-/<!-- pdf-(image|formula|table): page=(\d+) index=(\d+) file=([^\s>]+) -->/g,
-(_match, kind, pageNumber, _index, fileName) => {
+/<!-- pdf-(image|formula|table): page=(\d+) index=(\d+) file=([^\s>]+)(?: mode=(inline|block))? -->/g,
+(_match, kind, pageNumber, _index, fileName, formulaMode) => {
 const relativePath = `${root}/${baseName}.pdf/${fileName}`.split("\\").join("/");
-const label = kind === "formula" ? "Formula" : (kind === "table" ? "Table" : "Figure");
+const label = kind === "formula"
+  ? (formulaMode === "inline" ? "Inline formula" : "Formula")
+  : (kind === "table" ? "Table" : "Figure");
 return `![${label} preserved from PDF page ${pageNumber}](<${relativePath}>)`;
 }
 );
@@ -419,6 +421,7 @@ const baseName = documentOutputBaseName(document);
 let result;
 if (document.sourceType === "pdf" && converter.name === "pdf-text-layer-converter") {
 let progressQueue = Promise.resolve();
+let lastProgress = 40;
 result = await runPdfExtractionPipeline(document.sourcePath, {
 converter,
 preferredExtractor: options.preferredExtractor,
@@ -428,8 +431,9 @@ markerForceOcr: options.markerForceOcr,
 layoutAssetDir: path.join(workspacePath, "outputs", "assets", `${baseName}.pdf`),
 onProgress: (msg, percent) => {
 if (options && typeof options.update === "function") {
+if (Number.isFinite(percent)) lastProgress = percent;
 progressQueue = progressQueue.then(() =>
-options.update({ progress: percent || 40, message: msg }).catch(() => {})
+options.update({ progress: lastProgress, message: msg }).catch(() => {})
 );
 }
 }
@@ -479,6 +483,9 @@ if (document.sourceType === "pdf") {
   } else {
    readabilityState = "low_readable_all_extractors_failed";
   }
+ }
+ if (readabilityState === "readable" && result.stats?.semanticLoss?.formulaDamageLikely) {
+  readabilityState = "formula_reconstruction_required";
  }
 } else if (result.extractionQuality?.lowReadableText || result.quality?.hasOcrMissing || (document.sourceType === "txt" && hasHighMojibakeRatio(result.markdown))) {
  readabilityState = "low_readable_all_extractors_failed";
@@ -601,13 +608,16 @@ lowReadableText: resolvedLowReadableText,
 unsupportedFeatures: result.extractionQuality?.unsupportedFeatures || ["tables", "multi-column layouts", "images", "formulas", "annotations", "embedded_objects"],
 confidence: result.extractionQuality?.confidence || (resolvedTextLayerDetected && !resolvedLowReadableText ? "medium" : "low"),
 readabilityState: readabilityState,
-detectedEncoding: result.extractionQuality?.detectedEncoding
+ detectedEncoding: result.extractionQuality?.detectedEncoding
 };
 document.pdfVisualMapPath = pdfVisualArtifacts?.visualMapPath;
 document.pdfVisualAssetsIndexPath = pdfVisualArtifacts?.visualAssetsIndexPath;
 document.pdfRichAssetsPath = result.richAssetRoot || undefined;
+document.extractionQuality.semanticLoss = result.stats?.semanticLoss || null;
+document.extractionQuality.formulaDamageLikely = Boolean(result.stats?.semanticLoss?.formulaDamageLikely);
 document.extractionQuality.formulaEncodingArtifacts = result.stats?.semanticLoss?.octalArtifacts || 0;
 document.extractionQuality.cidArtifacts = result.stats?.semanticLoss?.cidArtifacts || 0;
+document.extractionQuality.privateUseArtifacts = result.stats?.semanticLoss?.privateUseArtifacts || 0;
 document.extractionQuality.visualContentStatus = pdfVisualArtifacts?.status;
 const qualityReport = await createQualityReport(
 workspacePath,

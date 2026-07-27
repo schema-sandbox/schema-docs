@@ -113,20 +113,56 @@ function promoteSetextHeadings(lines) {
 }
 function splitTableOfContentsLines(lines) {
   const output = [];
-  const entryPattern = /(\d{1,3}-\d{1,3})\s+(.+?)\s*(?:\.\s*){3,}(\d{1,3}-\d{1,3})(?=\s+\d{1,3}-\d{1,3}\s+|\s*$)/g;
+  // Textbooks number sections as ``5-2``, ``5.2``, ``44`` (a whole chapter), or
+  // ``A.3`` (an appendix).  Requiring a decimal point dropped the latter two,
+  // so those contents lines survived as one unreadable paragraph.
+  // A sub-entry always carries a separator (``5.2``, ``A.3``, ``5-2``).  A whole
+  // chapter may be a bare integer (``44 Convex Sets``), but accepting that form
+  // everywhere lets the leading chapter number of a contents block match as an
+  // entry, which swallows the chapter heading into the first entry's title.  So
+  // the strict form is tried first and the permissive one only as a fallback.
+  const strictEntryNumber = String.raw`(?:[A-Z]|\d{1,3})[.-]\d{1,3}`;
+  const looseEntryNumber = String.raw`(?:[A-Z]|\d{1,3})(?:[.-]\d{1,3})?`;
+  const pageNumber = String.raw`\d{1,4}(?:-\d{1,3})?`;
+  // A PDF text layer renders dot leaders glyph by glyph and drops stacked math
+  // glyphs onto the same baseline, so an entry arrives as ``. . . . 403 *``.
+  // The page number therefore cannot be anchored to the line end or to the next
+  // entry number; trailing glyph debris is consumed and discarded instead.
+  const leaderDebris = String.raw`[^\p{L}\p{N}]*`;
+  // A chapter heading such as ``4 Matrices and Linear Maps 115`` opens a
+  // contents block and carries no dot leader.  Titles are therefore matched
+  // lazily but must not swallow a page number followed by more words, which is
+  // what a bare chapter number at position zero would otherwise do.
+  const buildPattern = (entryNumber) => new RegExp(
+    `(${entryNumber})\\s+(.+?)\\s*(?:\\.\\s*){2,}${leaderDebris}(${pageNumber})${leaderDebris}(?=\\s*(?:${entryNumber}\\s+|$))`,
+    "gu"
+  );
+  const strictPattern = buildPattern(strictEntryNumber);
+  const loosePattern = buildPattern(looseEntryNumber);
   for (const rawLine of lines) {
     const line = String(rawLine || "").trim();
-    if ((line.match(/\./g) || []).length < 8 || !/\d{1,3}-\d{1,3}/.test(line)) {
+    // Two leaders are enough to identify an entry once debris is tolerated; the
+    // old threshold of eight rejected lines whose leader run was truncated.
+    if ((line.match(/\./g) || []).length < 3 || !new RegExp(looseEntryNumber).test(line)) {
       output.push(rawLine);
       continue;
     }
-    const entries = [...line.matchAll(entryPattern)];
+    // Numbered sub-entries are matched first so a leading chapter number stays
+    // in the prefix.  Only a line made purely of bare-integer chapter entries
+    // falls through to the permissive pattern.
+    let entries = [...line.matchAll(strictPattern)];
+    if (!entries.length) {
+      entries = [...line.matchAll(loosePattern)];
+    }
     if (!entries.length) {
       output.push(rawLine);
       continue;
     }
     const prefix = line.slice(0, entries[0].index).trim();
-    if (prefix) output.push(`**${prefix}**`);
+    if (prefix) {
+      const chapter = prefix.match(/^(\d{1,3})\s+(.+?)\s+(\d{1,4})$/);
+      output.push(chapter ? `**${chapter[1]} ${chapter[2]} - ${chapter[3]}**` : `**${prefix}**`);
+    }
     for (const match of entries) {
       output.push(`- ${match[1]} ${match[2].trim()} - ${match[3]}`);
     }

@@ -59,7 +59,10 @@ function renderMarkdownImage(alt, url) {
   .replace(/&gt;/g, ">");
  if (!/^(?:https?:|data:|#)/i.test(target) && state.workspacePath) {
   const markdownPath = $("notePath")?.value?.trim() || "";
-  const formulaClass = /Formula preserved from PDF/i.test(readableAlt) || /-formula-\d/i.test(target) ? " pdf-formula-image" : "";
+  const inlineFormula = /Inline formula preserved from PDF/i.test(readableAlt);
+  const formulaClass = /Formula preserved from PDF/i.test(readableAlt) || /-formula-\d/i.test(target)
+    ? ` pdf-formula-image ${inlineFormula ? "pdf-formula-inline" : "pdf-formula-block"}`
+    : "";
   return `<img loading="lazy" class="workspace-asset-image${formulaClass}" src="${escapeHtml(workspaceAssetUrl(markdownPath, target))}" alt="${escapeHtml(readableAlt)}" data-markdown-path="${escapeHtml(markdownPath)}" data-asset-path="${escapeHtml(target)}">`;
  }
  const apiBase = typeof localApiBaseUrl === "function" ? localApiBaseUrl() : "";
@@ -434,6 +437,17 @@ if (/^```/.test(trimmed)) {
     flushTable();
     continue;
    }
+   // Standalone figures and display formulas are blocks. Inline formula crops
+   // stay with surrounding text and CSS constrains them to the line height.
+   const isStandaloneImage = /^!\[(?:\\.|[^\]\\])*\]\((?:<[^>]+>|[^\s)]+)(?:\s+["'][^"']*["'])?\)$/.test(trimmed);
+   const isInlineFormulaImage = /^!\[Inline formula preserved from PDF page \d+\]/i.test(trimmed);
+   if (isStandaloneImage && !isInlineFormulaImage) {
+    flushParagraph();
+    flushList();
+    flushTable();
+    html.push(`<figure class="markdown-image-block" data-line-start="${lineIndex}" data-line-end="${lineIndex}" data-line-num="${lineIndex + 1}">${renderInlineMarkdown(trimmed)}</figure>`);
+    continue;
+   }
    if (trimmed.startsWith("$$")) {
     flushParagraph();
     flushList();
@@ -460,14 +474,18 @@ if (/^```/.test(trimmed)) {
     html.push(`<div class="markdown-math-block" data-line-start="${mathStart}" data-line-end="${lineIndex}" data-line-num="${mathStart + 1}" data-hover-hint="✎ Click to edit">${renderInlineMarkdown(`$$${formula}$$`)}</div>`);
     continue;
    }
-   if (/^\|.*\|$/.test(trimmed)) {
+   const nextLine = lines[lineIndex + 1]?.trim() ?? "";
+   // A PDF formula can legitimately contain `|DK|`, `|PM|`, or determinant
+   // notation.  A Markdown table needs a delimiter row; do not turn a lone
+   // bar-delimited mathematical expression into a bordered table.
+   const tableDelimiterFollows = /^\|\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?$/.test(nextLine);
+   if (/^\|.*\|$/.test(trimmed) && (table.length > 0 || tableDelimiterFollows)) {
     flushParagraph();
     flushList();
     table.push({ text: trimmed, line: lineIndex });
     continue;
    }
    flushTable();
-   const nextLine = lines[lineIndex + 1]?.trim() ?? "";
    if (
     trimmed
     && (/^={3,}$/.test(nextLine) || /^-{3,}$/.test(nextLine))
@@ -927,12 +945,22 @@ function scheduleMarkdownReadRender(delay = 160) {
  }
  function renderSegmentNavigation() {
   const container = $("markdownDocMeta");
-  if (!container || !state.selectedRecord) return;
-  container.querySelectorAll(".segment-navigation-section").forEach(el => el.remove());
-  const segmentsObj = state.selectedRecord?.markdownOutputs?.readableSegments;
   const banner = $("segmentBanner");
+  if (!container) return;
+  container.querySelectorAll(".segment-navigation-section").forEach(el => el.remove());
+  if (!state.selectedRecord) {
+   if (banner) {
+    banner.classList.add("hidden");
+    banner.replaceChildren();
+   }
+   return;
+  }
+  const segmentsObj = state.selectedRecord?.markdownOutputs?.readableSegments;
   if (!segmentsObj || !segmentsObj.segmented || !segmentsObj.segments?.length) {
-   if (banner) banner.classList.add("hidden");
+   if (banner) {
+    banner.classList.add("hidden");
+    banner.replaceChildren();
+   }
    return;
   }
   const currentPath = $("notePath").value.trim();

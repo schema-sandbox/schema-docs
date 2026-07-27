@@ -1255,6 +1255,26 @@ await delay(intervalMs);
 throw new Error(`Browser PDF output did not become complete and stable within ${timeoutMs} ms.`);
 }
 
+export function resolveBrowserPdfTimeouts(markdown, html, options = {}) {
+const htmlBytes = Buffer.byteLength(String(html || ""), "utf8");
+const imageCount = (String(markdown || "").match(/!\[[^\]]*\]\((?:<[^>]+>|[^\s)]+)\)/g) || []).length;
+// Large scientific books expand sharply when formulas and local images are
+// embedded into the printable HTML. Scale from the long-standing small-file
+// defaults while keeping a finite upper bound for a genuinely stuck browser.
+const sizeUnits = Math.max(0, Math.ceil(htmlBytes / (16 * 1024 * 1024)) - 1);
+const imageUnits = Math.ceil(imageCount / 1000);
+const complexityUnits = sizeUnits + imageUnits;
+const defaultBrowserTimeoutMs = Math.min(900000, 180000 + complexityUnits * 45000);
+const defaultOutputTimeoutMs = Math.min(600000, 120000 + complexityUnits * 30000);
+return {
+browserTimeoutMs: Math.max(10000, Number(options.browserTimeoutMs || defaultBrowserTimeoutMs)),
+pdfOutputTimeoutMs: Math.max(100, Number(options.pdfOutputTimeoutMs || defaultOutputTimeoutMs)),
+htmlBytes,
+imageCount,
+complexityUnits
+};
+}
+
 async function findChromiumPath() {
 const isWin = process.platform === "win32";
 const paths = isWin ? [
@@ -1299,6 +1319,7 @@ try {
 const browser = await findChromiumPath();
 if (!browser) throw new Error("No supported Microsoft Edge, Google Chrome, or Chromium executable was found.");
 const html = await exportMarkdownToHtml(markdown, options);
+const pdfTimeouts = resolveBrowserPdfTimeouts(markdown, html, options);
 tempDir = await mkdtemp(path.join(os.tmpdir(), "schema-docs-pdf-"));
 const tmpHtml = path.join(tempDir, "document.html");
 const tmpPdf = path.join(tempDir, "document.pdf");
@@ -1320,7 +1341,7 @@ execFile(browser, [
 pathToFileURL(tmpHtml).href
 ], {
 windowsHide: true,
-timeout: Math.max(10000, Number(options.browserTimeoutMs || 180000)),
+timeout: pdfTimeouts.browserTimeoutMs,
 maxBuffer: 16 * 1024 * 1024
 }, (error, stdout, stderr) => {
 resolve({ error, stdout: String(stdout || ""), stderr: String(stderr || "") });
@@ -1329,7 +1350,7 @@ resolve({ error, stdout: String(stdout || ""), stderr: String(stderr || "") });
 let pdfBuf;
 try {
 pdfBuf = await waitForStablePdfFile(tmpPdf, {
-timeoutMs: options.pdfOutputTimeoutMs,
+timeoutMs: pdfTimeouts.pdfOutputTimeoutMs,
 intervalMs: options.pdfOutputPollIntervalMs,
 stableSamples: options.pdfOutputStableSamples
 });

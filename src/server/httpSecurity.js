@@ -1,7 +1,10 @@
 import path from "node:path";
 
 export const HTTP_SECURITY_LIMITS = Object.freeze({
-  jsonBytes: 8 * 1024 * 1024,
+  // Merged exports temporarily send the complete Markdown through the
+  // token-protected loopback API. Multi-million-character CJK documents can
+  // exceed 8 MiB even when their source file is much smaller.
+  jsonBytes: 64 * 1024 * 1024,
   uploadBytes: 256 * 1024 * 1024
 });
 

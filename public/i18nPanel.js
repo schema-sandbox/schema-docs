@@ -154,7 +154,7 @@ const zhExtra = {
 "Choose an Excel workbook (.xlsx).": "请选择 Excel 工作簿（.xlsx）。",
 "Scientific refinement (editable formulas, slow)": "科学文档精炼（公式可编辑，耗时较长）",
 "Marker full-page reconstruction (slowest)": "Marker 全页重建（耗时最长）",
-"Layout extraction (fast, uncertain formulas stay as images)": "版面提取（较快，疑难公式保留为图片）",
+"Layout extraction (fast, readable formulas stay editable)": "版面提取（较快，可读公式保持可编辑）",
 "Preserve PDF formulas and figures": "保留 PDF 公式和图表",
 "Preserving visual content...": "正在保留视觉内容...",
 "Rendering low-confidence formulas, tables, and figures from the original PDF. Large files can take a while.": "正在从原 PDF 渲染低置信公式、表格和图片，大文件需要较长时间。",

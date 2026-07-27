@@ -12,14 +12,14 @@ change logs so the project stays lightweight for public preview.
 - Runtime dependencies: 0.
 - Dev dependencies: 1 (`@tauri-apps/cli`).
 - Source files checked by `npm run size-check`: 183, within the 195-file budget.
-- Source bytes: current public-preview source stays under the 1.7MB source budget.
-- Runtime bytes: current public-preview runtime stays under the 1.16MB runtime budget across 97 files, within the 100-file budget.
-- Lightweight size budget: enforced by `npm run size-check` with 0 runtime dependencies, at most 1 dev dependency, 1.16MB runtime budget, 1.7MB source budget, 100KB largest-file budget, 125KB runtime largest-file budget, 100KB public browser module budget, 100 runtime files, 195 checked source files, and 38,500 total source lines.
+- Source bytes: current public-preview source stays under the 1.9MB source budget.
+- Runtime bytes: current public-preview runtime stays under the 1.3MB runtime budget across 100 files, within the 100-file budget.
+- Lightweight size budget: enforced by `npm run size-check` with 0 runtime dependencies, at most 1 dev dependency, 1.3MB runtime budget, 1.9MB source budget, 100KB largest-file budget, 125KB runtime largest-file budget, 100KB public browser module budget, 100 runtime files, 195 checked source files, and 42,500 total source lines.
 - The size gate warns when source bytes exceed 80%, when the largest source file exceeds 90%, when the largest runtime file exceeds 90%, and when the largest public browser module exceeds 90% of its budget.
 
 ## Verified Commands
 
-- `npm test`: 333 tests, 332 pass, 1 skipped manual external-sync scenario.
+- `npm test`: 381 tests, 380 pass, 1 skipped manual external-sync scenario.
 - `npm run smoke`: passed exchange package read-back plus receiver/trust report writing.
 - `npm run fixture-smoke`: passed with 10 `pass`, 1 `known_limit`, and 1 `blocked` pending current-artifact desktop verification.
 - `npm run fixture-check`: passed.

@@ -261,7 +261,7 @@ results.push(existingDesktopValidation.ok
     ));
 
 const fileSummary = {
-  releaseTarget: "v0.1.2",
+  releaseTarget: "v0.1.3",
   generatedBy: "npm run fixture-smoke",
   results,
   statusCounts: results.reduce((counts, item) => {

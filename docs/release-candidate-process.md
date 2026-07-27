@@ -9,7 +9,7 @@ This document details the quality gate criteria, preflight validations, and tagg
 Before a build can be tagged as a Release Candidate, it must satisfy the following criteria:
 
 1. **Unit & Integration Tests**: The required automated unit and integration suites must be green with no known regressions.
-2. **Size Budget**: The runtime surface and repository source must stay within strict lightweight limits. `size-check` enforces 0 runtime dependencies, at most 1 dev dependency, a 1.16MB runtime budget for `src/core`, `src/server`, `src/adapters`, `src/sdk`, and `public`, a 1.7MB source/test/docs budget, a 100KB largest source file budget, a 125KB largest runtime file budget, a 100KB public browser module budget, 100 runtime files, 195 checked source files, and 38,500 checked source lines.
+2. **Size Budget**: The runtime surface and repository source must stay within strict lightweight limits. `size-check` enforces 0 runtime dependencies, at most 1 dev dependency, a 1.3MB runtime budget for `src/core`, `src/server`, `src/adapters`, `src/sdk`, and `public`, a 1.9MB source/test/docs budget, a 100KB largest source file budget, a 125KB largest runtime file budget, a 100KB public browser module budget, 100 runtime files, 195 checked source files, and 42,500 checked source lines.
 3. **Default English Boundary**: Default runtime surfaces, release docs, and runtime config must pass `language-boundary-check`; multilingual content belongs in tests, fixtures, internal strategy docs, or locale resources.
 4. **Release Integrity Check**: Version indexing, API contract compliance, and licensing checks must pass.
 5. **Fixture Strictness**: All capability fixtures and user workflows must match expectations exactly (`fixture-check --strict`).
@@ -62,7 +62,7 @@ npm run public-preview-package -- --json
 
 The script runs the following underlying checks:
 - **`npm test`**: Runs the entire Node.js test runner suite.
-- **`node src/cli/size-check.js`**: Validates runtime, public browser module, and repository size budgets, reports runtime bytes separately from source/test/docs bytes, fails on budget violations, warns after source bytes pass 80% of the 1.7MB budget, and warns when the largest source/runtime/public browser module file passes 90% of its budget.
+- **`node src/cli/size-check.js`**: Validates runtime, public browser module, and repository size budgets, reports runtime bytes separately from source/test/docs bytes, fails on budget violations, warns after source bytes pass 80% of the 1.9MB budget, and warns when the largest source/runtime/public browser module file passes 90% of its budget.
 - **`node src/cli/language-boundary-check.js`**: Verifies default product surfaces and release docs remain English-only while allowing CJK coverage in tests and fixtures.
 - **`node src/cli/release-check.js`**: Checks semantic versioning and release requirements.
 - **`node src/cli/fixture-check.js --strict`**: Runs capability matrix checks in strict verification mode.

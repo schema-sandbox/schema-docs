@@ -75,10 +75,18 @@ test("language-boundary-check blocks mojibake everywhere and CJK in default surf
 test("language-boundary-check ignores local customer fresh test workspaces", async () => {
   const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "schema-docs-language-customer-workspace-"));
   const generatedWorkspacePath = path.join(fixtureRoot, "customer-fresh-test", "outputs", "readable", "normal.readable.md");
+  const functionalTestWorkspacePath = path.join(fixtureRoot, "functest-ws-20260727", "exports", "large-chinese-document.html");
+  const customerReportPath = path.join(fixtureRoot, "docs", "客户视角全面测试报告_2026-07-28_v0.1.3.md");
+  const localizedReleaseNotesPath = path.join(fixtureRoot, "docs", "v0.1.3-release-notes.md");
   const defaultSurfacePath = path.join(fixtureRoot, "README.md");
   await mkdir(path.dirname(generatedWorkspacePath), { recursive: true });
+  await mkdir(path.dirname(functionalTestWorkspacePath), { recursive: true });
+  await mkdir(path.dirname(customerReportPath), { recursive: true });
   await writeFile(generatedWorkspacePath, "# 中文测试夹具\n\n这是客户视角重测生成的本地工作区内容。\n", "utf8");
   await writeFile(defaultSurfacePath, "# Schema Docs\n", "utf8");
+  await writeFile(functionalTestWorkspacePath, "<p>\u6d4b\u8bd5\u4ea7\u7269</p>\n", "utf8");
+  await writeFile(customerReportPath, "# 客户测试证据\n", "utf8");
+  await writeFile(localizedReleaseNotesPath, "# 中文发行说明\n", "utf8");
   try {
     const result = await runCliJson(languageBoundaryCheckPath, ["--json", "--root", fixtureRoot], {
       maxBuffer: 16 * 1024 * 1024

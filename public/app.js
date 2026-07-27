@@ -221,6 +221,10 @@ async function showEditorWarningsForRecord(record) {
     stateText = "OCR Required";
     bgCol = "rgba(249, 115, 22, 0.2)";
     textCol = "#f97316";
+   } else if (qState === "formula_reconstruction_required") {
+    stateText = "Math Reconstruction Required";
+    bgCol = "rgba(239, 68, 68, 0.2)";
+    textCol = "#ef4444";
    } else if (qState === "review_required") {
     stateText = "Review Required";
     bgCol = "rgba(245, 158, 11, 0.2)";
@@ -294,6 +298,14 @@ async function showEditorWarningsForRecord(record) {
   warningBlock.style.fontSize = "12px";
   warningBlock.innerHTML = `[!] <strong>Notice:</strong> Extracted PDF text layer is low-readable/scanned. Run OCR or import a searchable text-layer PDF before sending to AI.`;
   leftDiv.appendChild(warningBlock);
+ } else if (record.extractionQuality?.formulaDamageLikely) {
+  const warningBlock = document.createElement("div");
+  warningBlock.style.width = "100%";
+  warningBlock.style.marginTop = "4px";
+  warningBlock.style.color = "#ef4444";
+  warningBlock.style.fontSize = "12px";
+  warningBlock.innerHTML = `[!] <strong>Math warning:</strong> Text is readable, but formula symbols were damaged during extraction. The Office workflow keeps source-linked formula visuals where available and blocks this document from AI intake until it is reviewed.`;
+  leftDiv.appendChild(warningBlock);
  } else if (record.warnings && record.warnings.length > 0) {
   const importantWarnings = record.warnings.filter(w => w.includes("mojibake") || w.includes("No readable text") || w.includes("Low-readable"));
   if (importantWarnings.length > 0) {
@@ -340,6 +352,18 @@ async function showEditorWarningsForRecord(record) {
   }
  });
  rightDiv.appendChild(copySummaryBtn);
+ if (state.advancedToolsVisible && record.sourceType === "pdf" && record.extractionQuality?.formulaDamageLikely) {
+  const markerRetryBtn = miniActionButton("Developer: rebuild math with Marker", "#dc2626", async () => {
+   showAlert("info", "Starting local full-page mathematical reconstruction. Large books remain open while each phase completes.");
+   const result = await api("/api/document/retry-extraction", { documentId: record.id, preferredExtractor: "marker" });
+   await refreshManifest();
+   refreshTimeline();
+   refreshVersions();
+   showAlert("success", `Marker reconstruction completed: ${result.output?.readableMarkdownPath || "Markdown updated"}`);
+   return result;
+  });
+  rightDiv.appendChild(markerRetryBtn);
+ }
  const refreshBtn = miniActionButton("Refresh source", "#10b981", async () => {
   showAlert("info", "Refreshing source file and re-extracting...");
   const res = await api("/api/record/refresh", { recordId: record.id });
@@ -718,9 +742,10 @@ async function refreshManifest() {
   manifestPanel.renderManifest(manifest);
   renderApiProfiles(manifest.apiProfiles ?? []);
   renderFormatMatrix(capabilities);
-  adapterCapabilitiesPanel.renderAdapterCapabilities(adapterCapabilities);
-  return manifest;
+ adapterCapabilitiesPanel.renderAdapterCapabilities(adapterCapabilities);
+ return manifest;
  } catch (err) {
+  console.error("Workspace refresh failed:", err);
  }
 }
 async function ensureWorkspaceForFirstWorkflow() {
@@ -832,6 +857,7 @@ async function selectAndPrepareImportedRecord(record) {
  const selected = Array.isArray(record) ? record[0] : record;
  if (!selected?.id) return { selected: false };
  state.currentRecord = selected;
+ state.selectedRecord = selected;
  $("recordId").value = selected.id;
  showAlert("info", `Preparing preview for ${selected.title || selected.name || selected.id}...`);
  if (selected.kind === "dataset" || selected.sourceType === "csv" || selected.sourceType === "xlsx") {
@@ -856,6 +882,7 @@ async function selectAndPrepareImportedRecord(record) {
   }
   {
    state.currentRecord = doc;
+   state.selectedRecord = doc;
    const indexPath = readableRelativePathForRecord(doc);
    const firstSegmentPath = doc.markdownOutputs?.readableSegments?.segments?.[0]?.relativePath || "";
    const relPath = firstSegmentPath || indexPath;
@@ -947,10 +974,22 @@ async function saveCurrentNote() {
  const relativePath = $("notePath").value.trim();
  const content = $("noteContent").value;
  const result = isExternalMarkdownPath(relativePath)
-  ? await api("/api/markdown/save-external", { sourcePath: relativePath, content })
+  ? await saveExternalMarkdownFile(relativePath, content)
   : await api("/api/markdown/save", { relativePath, content });
  markMarkdownClean(content);
  return result;
+}
+async function readExternalMarkdownFile(sourcePath) {
+ if (window.__TAURI__) {
+  return tauriInvoke("read_authorized_markdown_file", { sourcePath });
+ }
+ return api("/api/markdown/read-external", { sourcePath });
+}
+async function saveExternalMarkdownFile(sourcePath, content) {
+ if (window.__TAURI__) {
+  return tauriInvoke("save_authorized_markdown_file", { sourcePath, content });
+ }
+ return api("/api/markdown/save-external", { sourcePath, content });
 }
 function currentMarkdownContent() {
  if (window.markdownEditor && typeof window.markdownEditor.getValue === "function") {
@@ -1127,6 +1166,40 @@ async function chooseNativeSavePath({ inputId, defaultPath, filterName, extensio
   return "";
  }
 }
+function protectedExportStagePath(format, requestedPath = "") {
+ const cleanFormat = String(format || "md").replace(/[^a-z0-9]/gi, "").toLowerCase() || "md";
+ const nonce = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+ const requestedName = String(requestedPath || "").replace(/\\/g, "/").split("/").pop() || `document.${cleanFormat}`;
+ const safeName = requestedName
+  .replace(/[<>:"/\\|?*\u0000-\u001F]/g, "-")
+  .replace(/\.[^.]+$/, `.${cleanFormat}`);
+ return `.schema-docs-export-staging/${nonce}/${safeName}`;
+}
+async function exportMarkdownToDestination(input) {
+ const requestedPath = String(input.outputRelativePath || "").trim();
+ if (!isAbsoluteLocalPath(requestedPath) || isInsideCurrentWorkspace(requestedPath)) {
+  return api("/api/markdown/export", input);
+ }
+ const stagedRelativePath = protectedExportStagePath(input.format, requestedPath);
+ const stagedResult = await api("/api/markdown/export", {
+  ...input,
+  outputRelativePath: stagedRelativePath
+ });
+ const stagedPath = typeof stagedResult === "string"
+  ? stagedResult
+  : stagedResult?.outputPath;
+ if (!stagedPath) {
+  throw new Error("The protected desktop export did not return a staged file path.");
+ }
+ const finalPath = await tauriInvoke("finalize_authorized_export", {
+  workspacePath: state.workspacePath,
+  sourcePath: stagedPath,
+  destinationPath: requestedPath
+ });
+ return typeof stagedResult === "string"
+  ? finalPath
+  : { ...stagedResult, outputPath: finalPath };
+}
 async function saveCurrentNoteWithDialog() {
  if (!warnIfSavingOrExportingCurrentSegment("Save")) return { cancelled: true };
  if (window.markdownEditor && typeof window.markdownEditor.getValue === "function") {
@@ -1148,7 +1221,7 @@ async function saveCurrentNoteWithDialog() {
     relativePath: tempMdPath,
     content: $("noteContent").value
    });
-   result = await api("/api/markdown/export", {
+   result = await exportMarkdownToDestination({
     relativePath: tempMdPath,
     outputRelativePath: selected,
     format: "md"
@@ -1334,7 +1407,7 @@ async function saveRedactedCopy() {
   const tempMdPath = temporaryMarkdownPath("redacted-copy");
   try {
    await api("/api/markdown/save", { relativePath: tempMdPath, content: maskedText });
-   result = await api("/api/markdown/export", {
+   result = await exportMarkdownToDestination({
     relativePath: tempMdPath,
     outputRelativePath: selected,
     format: "md"
@@ -1441,10 +1514,7 @@ async function exportCurrentNote(format, outputId) {
  try {
   let exportSourcePath = sourcePath;
   if (isExternalMarkdownPath(sourcePath)) {
-   await api("/api/markdown/save-external", {
-    sourcePath,
-    content: latestContent
-   });
+   await saveExternalMarkdownFile(sourcePath, latestContent);
    temporarySourcePath = temporaryMarkdownPath("external-export");
    await api("/api/markdown/save", {
     relativePath: temporarySourcePath,
@@ -1461,7 +1531,7 @@ async function exportCurrentNote(format, outputId) {
   if (statusText) {
    statusText.textContent = `exporting...`;
   }
-  const result = await api("/api/markdown/export", {
+  const result = await exportMarkdownToDestination({
    relativePath: exportSourcePath,
    outputRelativePath: targetVal,
    format
@@ -1585,7 +1655,7 @@ async function exportMergedNote(format) {
    if (statusText) {
     statusText.textContent = `Exporting merged ${label}...`;
    }
-   result = await api("/api/markdown/export", {
+   result = await exportMarkdownToDestination({
     relativePath: tempMdPath,
     outputRelativePath: finalExportPath,
     format,
@@ -1638,7 +1708,7 @@ window.exportMergedNote = format => mergedExportQueue = mergedExportQueue.catch(
 function stripGeneratedSegmentMetadata(content) {
  const value = String(content ?? "");
  return value
-  .replace(/^>\s*Human Markdown segment \d+\/\d+\s*\r?\n?/im, "")
+  .replace(/^>\s*Human Markdown segment \d+\/\d+\.?\s*\r?\n?/im, "")
   .replace(/^>\s*Source line range:\s*[^\r\n]*\r?\n?/im, "")
   .replace(/^\s+/, "")
   .trimEnd();
@@ -1703,7 +1773,7 @@ async function handleOpenMarkdownFile() {
  }
  $("sourcePath").value = selected;
  showAlert("info", "Opening Markdown file...");
- const content = await api("/api/markdown/read-external", { sourcePath: selected });
+ const content = await readExternalMarkdownFile(selected);
  state.currentRecord = null;
  state.selectedRecord = null;
  $("recordId").value = "";

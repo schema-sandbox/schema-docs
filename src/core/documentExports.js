@@ -16,7 +16,9 @@ return String(markdown || "")
 .trim();
 }
 async function renderMarkdown(markdown, format, options = {}) {
-const cleaned = cleanMarkdownForExport(markdown, options);
+const cleaned = format === "md" && options.stripProcessMetadata === false
+? String(markdown ?? "")
+: cleanMarkdownForExport(markdown, options);
 if (format === "md") return Buffer.from(cleaned, "utf8");
 if (format === "docx") {
 try {

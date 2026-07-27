@@ -8,6 +8,7 @@ import {
   exportMarkdownToDocx,
   exportMarkdownToHtml,
   exportMarkdownToPdf,
+  resolveBrowserPdfTimeouts,
   sanitizeXmlText,
   waitForStablePdfFile
 } from "../src/core/markdownExportPipeline.js";
@@ -326,6 +327,22 @@ test("Markdown Export Pipeline - waits for delayed browser PDF output to become 
     await writer.catch(() => {});
     await rm(tempDir, { recursive: true, force: true });
   }
+});
+
+test("Markdown Export Pipeline - scales browser PDF timeouts for image-heavy scientific books", () => {
+  const markdown = Array.from(
+    { length: 3797 },
+    (_, index) => `![Formula ${index}](<assets/formula-${index}.png>)`
+  ).join("\n");
+  const html = "x".repeat(75 * 1024 * 1024);
+  const scaled = resolveBrowserPdfTimeouts(markdown, html);
+  assert.equal(scaled.imageCount, 3797);
+  assert.ok(scaled.browserTimeoutMs >= 540000);
+  assert.ok(scaled.pdfOutputTimeoutMs >= 360000);
+
+  const small = resolveBrowserPdfTimeouts("# Small", "<p>Small</p>");
+  assert.equal(small.browserTimeoutMs, 180000);
+  assert.equal(small.pdfOutputTimeoutMs, 120000);
 });
 
 test("Markdown Export Pipeline - image-only slide deck exports one embedded image per PDF page", async () => {

@@ -28,4 +28,5 @@ export const desktopPreviewPath = path.join(projectRoot, "src", "cli", "desktop-
 export const desktopAppSmokePath = path.join(projectRoot, "src", "cli", "desktop-app-smoke.js");
 export const desktopWorkflowSmokePath = path.join(projectRoot, "src", "cli", "desktop-workflow-smoke.js");
 export const desktopBridgeSmokePath = path.join(projectRoot, "src", "cli", "desktop-bridge-smoke.js");
+export const desktopRuntimeCheckPath = path.join(projectRoot, "src", "cli", "desktop-runtime-check.js");
 export const desktopRuntimeLauncherPath = path.join(projectRoot, "src", "cli", "desktop-runtime-launcher.js");

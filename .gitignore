@@ -22,6 +22,7 @@ Thumbs.db
 /.local-file-tool/
 /.ai-doc-exchange/
 /.desktop-runtime/
+/.desktop-runtime-dev/
 /imports/
 /notes/
 /outputs/
@@ -60,6 +61,7 @@ Thumbs.db
 # Local review reports and oversized manual fixtures are not public source files
 /github_readiness_report.md
 /self_test_report.md
+/docs/客户视角全面测试报告_*.md
 /test-fixtures/manual-smoke/long.md
 
 # Internal strategy and roadmap documents (not for public release)

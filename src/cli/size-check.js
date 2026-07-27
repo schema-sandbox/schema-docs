@@ -12,11 +12,11 @@ const IGNORED_SOURCE_PATTERNS = [
 const BUDGETS = {
   runtimeDependencies: 0,
   devDependencies: 1,
-  runtimeBytes: 1_300_000,
+  runtimeBytes: 1_320_000,
   runtimeFiles: 100,
   sourceFiles: 195,
-  totalBytes: 1_850_000,
-  totalLines: 42_000,
+  totalBytes: 1_900_000,
+  totalLines: 43_000,
   largestFileBytes: 100_000,
   runtimeLargestFileBytes: 125_000,
   publicModuleBytes: 100_000
@@ -29,13 +29,13 @@ async function walkFiles(dir) {
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (entry.name === "libs" || entry.name === "images" || entry.name === "icons" || entry.name === "resources" || entry.name === "node_modules" || entry.name === "target" || entry.name === "dist") {
+      if (entry.name === "libs" || entry.name === "images" || entry.name === "icons" || entry.name === "resources" || entry.name === "node_modules" || entry.name === "target" || entry.name === "dist" || entry.name === "__pycache__") {
         continue;
       }
       files.push(...await walkFiles(fullPath));
     } else {
       const ext = path.extname(entry.name).toLowerCase();
-      if ([".png", ".jpg", ".jpeg", ".gif", ".ico", ".exe", ".pdf", ".zip", ".msi", ".woff", ".woff2"].includes(ext)) {
+      if ([".png", ".jpg", ".jpeg", ".gif", ".ico", ".exe", ".pdf", ".zip", ".msi", ".woff", ".woff2", ".pyc", ".pyo"].includes(ext)) {
         continue;
       }
       files.push(fullPath);

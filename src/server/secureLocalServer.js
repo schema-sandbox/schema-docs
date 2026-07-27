@@ -2,7 +2,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
-import { rm } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { createLocalServer } from "./localServer.js";
 import {
   HTTP_SECURITY_LIMITS,
@@ -19,6 +19,8 @@ import {
 const API_TOKEN_HEADER = "x-ai-doc-exchange-token";
 const BOOTSTRAP_TOKEN_HEADER = "x-schema-docs-bootstrap-token";
 const ASSET_ROUTE = "/api/workspace-asset";
+const ROOT = path.resolve(import.meta.dirname, "../..");
+const DESKTOP_BOOTSTRAP_CONFIG = path.join(ROOT, "public", "app-config.js");
 const ALLOWED_REQUEST_HEADERS = [
   "content-type",
   API_TOKEN_HEADER,
@@ -67,6 +69,18 @@ function sendJson(request, response, statusCode, payload) {
   }));
   response.writeHead(statusCode, headers);
   response.end(JSON.stringify(payload, null, 2));
+}
+
+async function sendDesktopBootstrapConfig(response) {
+  // This is deliberately the static bootstrap script, never localServer's
+  // dynamic app-config response. The latter contains the private API base
+  // used by the internal pipe and made `tauri dev` unusable after hardening.
+  const script = await readFile(DESKTOP_BOOTSTRAP_CONFIG, "utf8");
+  response.writeHead(200, applyCommonSecurityHeaders({
+    "content-type": "text/javascript; charset=utf-8",
+    "cache-control": "no-store"
+  }, { staticAsset: true }));
+  response.end(script);
 }
 
 function canUseAssetRoute(request, url, assetToken) {
@@ -128,64 +142,13 @@ function proxyBuffered({ request, response, socketPath, internalToken, url, body
   });
 }
 
-function proxyUpload({ request, response, socketPath, internalToken, url, maxBytes }) {
-  return new Promise((resolve) => {
-    const declared = Number(request.headers["content-length"] || 0);
-    if (declared > maxBytes) {
-      sendJson(request, response, 413, errorPayload(new HttpSecurityError(413, "request_too_large", `Upload exceeds the ${maxBytes}-byte limit.`)));
-      request.resume();
-      resolve();
-      return;
-    }
-    const upstreamUrl = new URL(url.toString());
-    upstreamUrl.searchParams.delete("token");
-    const upstream = http.request({
-      socketPath,
-      method: request.method,
-      path: `${upstreamUrl.pathname}${upstreamUrl.search}`,
-      headers: {
-        ...filteredUpstreamHeaders(request.headers, declared || null),
-        [API_TOKEN_HEADER]: internalToken,
-        host: "schema-docs-internal"
-      }
-    }, (upstreamResponse) => {
-      response.writeHead(upstreamResponse.statusCode || 502, proxyResponseHeaders(request, upstreamResponse.headers, url.pathname));
-      upstreamResponse.pipe(response);
-      upstreamResponse.on("end", resolve);
-    });
-    let total = 0;
-    let aborted = false;
-    const failLarge = () => {
-      if (aborted) return;
-      aborted = true;
-      upstream.destroy();
-      if (!response.headersSent) sendJson(request, response, 413, errorPayload(new HttpSecurityError(413, "request_too_large", `Upload exceeds the ${maxBytes}-byte limit.`)));
-      request.resume();
-      resolve();
-    };
-    request.on("data", (chunk) => {
-      total += chunk.length;
-      if (total > maxBytes) {
-        failLarge();
-        return;
-      }
-      if (!aborted && !upstream.write(chunk)) request.pause();
-    });
-    upstream.on("drain", () => request.resume());
-    request.on("end", () => {
-      if (!aborted) upstream.end();
-    });
-    request.on("error", (error) => {
-      aborted = true;
-      upstream.destroy(error);
-      resolve();
-    });
-    upstream.on("error", (error) => {
-      if (!aborted && !response.headersSent) sendJson(request, response, 502, errorPayload(new HttpSecurityError(502, "internal_api_unavailable", error.message)));
-      aborted = true;
-      resolve();
-    });
-  });
+async function proxyUpload({ request, response, socketPath, internalToken, url, maxBytes }) {
+  // The internal import endpoint already reads a bounded complete file before
+  // conversion. Streaming into the named-pipe ClientRequest introduced a
+  // back-pressure deadlock for ordinary PDF uploads. Buffer once at the public
+  // boundary with the same explicit limit, then send a complete request.
+  const body = await readBoundedBody(request, maxBytes);
+  await proxyBuffered({ request, response, socketPath, internalToken, url, body });
 }
 
 async function listenServer(server, listenTarget) {
@@ -255,6 +218,14 @@ export async function listenSecureLocalServer(options = {}) {
           data: { apiBaseUrl, token: publicToken, assetToken }
         });
         options.onBootstrapToken?.({ apiBaseUrl, bootstrapToken, previousToken });
+        return;
+      }
+      if (url.pathname === "/app-config.js") {
+        if (request.method !== "GET" && request.method !== "HEAD") {
+          sendJson(request, response, 405, errorPayload(new HttpSecurityError(405, "method_not_allowed", "Only GET is allowed for the desktop bootstrap script.")));
+          return;
+        }
+        await sendDesktopBootstrapConfig(response);
         return;
       }
       if (url.pathname.startsWith("/api/")) {

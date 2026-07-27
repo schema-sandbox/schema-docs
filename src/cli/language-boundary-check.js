@@ -9,7 +9,7 @@ const execFileAsync = promisify(execFile);
 const defaultRoot = path.resolve(import.meta.dirname, "../..");
 
 const binaryExtensions = new Set([
-  ".exe", ".dll", ".msi", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".icns", ".pdf", ".docx", ".xlsx", ".zip", ".woff", ".woff2"
+  ".exe", ".dll", ".msi", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".icns", ".pdf", ".docx", ".pptx", ".xlsx", ".zip", ".woff", ".woff2", ".pyc", ".pyo"
 ]);
 
 const defaultEnglishPatterns = [
@@ -54,6 +54,7 @@ const allowedMultilingualPatterns = [
   /^test\/manual\/external-sync\.mjs$/,
   /^src\/core\/dlp-rules\.json$/,
   /^docs\/github-release-draft-v0\.1\.0\.md$/,
+  /^docs\/v0\.1\.3-release-notes\.md$/,
   /^docs\/public-preview-manual-test-checklist\.md$/,
   /^docs\/public-preview-sample-report\.md$/,
   /^docs\/demo-flow\.md$/,
@@ -69,9 +70,10 @@ const ignoredGeneratedContentPatterns = [
   /^test-workspace(?:-[^/]+)?\//,
   /^customer-(?:test|v\d+)-workspace\//,
   /^customer-fresh-test\//,
+  /^functest-ws(?:-[^/]+)?\//,
   /^clean-retest-\d{4}-\d{2}-\d{2}\//,
   /^retest-v\d+\//,
-  /^docs\/\u5ba2\u6237\u89c6\u89d2\u5168\u9762\u6d4b\u8bd5\u62a5\u544a_\d{4}-\d{2}-\d{2}(?:_v\d+|-[^/]+)?\.md$/
+  /^docs\/\u5ba2\u6237\u89c6\u89d2\u5168\u9762\u6d4b\u8bd5\u62a5\u544a_\d{4}-\d{2}-\d{2}(?:_v\d+(?:\.\d+){0,2}|-[^/]+)?\.md$/
 ];
 
 function normalizePath(filePath) {
@@ -121,7 +123,8 @@ async function listFiles(root) {
       "--files",
       "-g", "!node_modules/**",
       "-g", "!src-tauri/target/**",
-      "-g", "!.git/**"
+      "-g", "!.git/**",
+      "-g", "!**/__pycache__/**"
     ], {
       cwd: root,
       maxBuffer: 16 * 1024 * 1024
@@ -139,6 +142,10 @@ async function listFiles(root) {
           normRel.startsWith("node_modules") ||
           normRel.startsWith("src-tauri/target") ||
           normRel.startsWith(".git") ||
+          normRel === "__pycache__" ||
+          normRel.startsWith("__pycache__/") ||
+          normRel.includes("/__pycache__/") ||
+          normRel.endsWith("/__pycache__") ||
           normRel.includes("/tmp-") ||
           normRel.startsWith("tmp-")
         ) {

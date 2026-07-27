@@ -236,6 +236,28 @@ test("returns guided errors from upload import API", async () => {
     assert.match(payload.error.guidance, /DOCX, PPTX, PDF, XLSX, CSV, MD, or TXT/);
   });
 });
+
+test("upload import creates a missing workspace manifest before writing the record", async () => {
+  await withServer(async (baseUrl) => {
+    const workspacePath = await mkdtemp(path.join(os.tmpdir(), "lft-server-upload-fresh-"));
+    const token = await getToken(baseUrl);
+    const response = await fetch(`${baseUrl}/api/import-upload?workspacePath=${encodeURIComponent(workspacePath)}&filename=first-note.md`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/octet-stream",
+        "x-ai-doc-exchange-token": token
+      },
+      body: Buffer.from("# First note\n")
+    });
+    const payload = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(payload.ok, true);
+    assert.equal(payload.data.status, "imported");
+    const manifest = await getJson(baseUrl, "/api/manifest", { workspacePath });
+    assert.equal(manifest.ok, true);
+    assert.equal(manifest.data.documents.some((document) => document.id === payload.data.id), true);
+  });
+});
 test("rejects API calls without local token", async () => {
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/workspace/open`, {

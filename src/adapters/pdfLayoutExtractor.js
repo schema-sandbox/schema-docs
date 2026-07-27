@@ -1,11 +1,38 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const execFileAsync = promisify(execFile);
+
+// Layout extraction cost scales with page count, and a book-length PDF needs far
+// longer than a report. A fixed ceiling makes the whole document fail once it is
+// exceeded -- the error discards the layout result and the pipeline falls back to
+// plain pdftotext, which performs no formula reconstruction at all. So the budget
+// is derived from the input size, with the fixed value kept as the floor.
+const LAYOUT_TIMEOUT_FLOOR_MS = 20 * 60 * 1000;
+const LAYOUT_TIMEOUT_PER_MB_MS = 90 * 1000;
+const LAYOUT_TIMEOUT_CEILING_MS = 6 * 60 * 60 * 1000;
+
+// The Markdown and manifest are written to files, so stdout only carries
+// diagnostics. A long document still emits enough of them to exceed a small
+// buffer, and exceeding it kills the process and loses the entire extraction.
+const LAYOUT_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
+
+export async function resolveLayoutTimeoutMs(sourcePath, explicitTimeoutMs) {
+  if (Number(explicitTimeoutMs) > 0) return Number(explicitTimeoutMs);
+  try {
+    const { size } = await stat(sourcePath);
+    const budget = LAYOUT_TIMEOUT_FLOOR_MS
+      + Math.ceil(size / (1024 * 1024)) * LAYOUT_TIMEOUT_PER_MB_MS;
+    return Math.min(budget, LAYOUT_TIMEOUT_CEILING_MS);
+  } catch {
+    // An unreadable size is not a reason to fail; keep the previous behaviour.
+    return LAYOUT_TIMEOUT_FLOOR_MS;
+  }
+}
 const scriptPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "pdfLayoutExtractor.py");
 const formulaOcrScriptPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "pdfFormulaOcr.py");
 
@@ -52,11 +79,15 @@ export function analyzePdfSemanticLoss(markdown) {
   const text = String(markdown || "");
   const octalArtifacts = (text.match(/\\[0-2][0-7]{2}/g) || []).length;
   const cidArtifacts = (text.match(/\(cid:\d+\)/g) || []).length;
+  const privateUseArtifacts = (text.match(/[\uE000-\uF8FF]/g) || []).length;
+  const replacementArtifacts = (text.match(/\uFFFD/g) || []).length;
   const brokenLigatureMath = (text.match(/(?:@|=|\\[0-7]{3})\s*(?:ff|fi|fl|ffi|ffl)\b/g) || []).length;
-  const score = octalArtifacts * 3 + cidArtifacts * 4 + brokenLigatureMath * 2;
+  const score = octalArtifacts * 3 + cidArtifacts * 4 + privateUseArtifacts * 4 + replacementArtifacts * 5 + brokenLigatureMath * 2;
   return {
     octalArtifacts,
     cidArtifacts,
+    privateUseArtifacts,
+    replacementArtifacts,
     brokenLigatureMath,
     score,
     formulaDamageLikely: score >= 24
@@ -79,8 +110,8 @@ export async function extractPdfWithLayout(sourcePath, options = {}) {
     if (options.maxPages) args.push("--max-pages", String(options.maxPages));
     if (options.assetDir) args.push("--asset-dir", options.assetDir);
     const { stdout, stderr } = await runPython(detection, args, {
-      timeout: options.timeoutMs || 20 * 60 * 1000,
-      maxBuffer: 4 * 1024 * 1024,
+      timeout: await resolveLayoutTimeoutMs(sourcePath, options.timeoutMs),
+      maxBuffer: LAYOUT_MAX_BUFFER_BYTES,
       windowsHide: true,
       env: { ...process.env, PYTHONIOENCODING: "utf-8" }
     });

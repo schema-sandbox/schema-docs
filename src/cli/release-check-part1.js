@@ -72,10 +72,10 @@ export function getChecksPart1(context) {
       ok: Boolean(
         sizeCheckCli.includes("const BUDGETS")
         && sizeCheckCli.includes("runtimeDependencies: 0")
-        && sizeCheckCli.includes("runtimeBytes: 1_300_000")
+        && sizeCheckCli.includes("runtimeBytes: 1_320_000")
         && sizeCheckCli.includes("sourceFiles: 195")
-        && sizeCheckCli.includes("totalBytes: 1_850_000")
-        && sizeCheckCli.includes("totalLines: 42_000")
+        && sizeCheckCli.includes("totalBytes: 1_900_000")
+        && sizeCheckCli.includes("totalLines: 43_000")
         && sizeCheckCli.includes("largestFileBytes: 100_000")
         && sizeCheckCli.includes("runtimeLargestFileBytes: 125_000")
         && sizeCheckCli.includes("publicModuleBytes: 100_000")
@@ -84,11 +84,11 @@ export function getChecksPart1(context) {
         && sizeCheckCli.includes("largest source file is above 90% of budget")
         && sizeCheckCli.includes("largest runtime file is above 90% of budget")
         && sizeCheckCli.includes("largest public browser module is above 90% of budget")
-        && releaseDocTexts["docs/implementation-status.md"]?.includes("1.7MB source budget")
+        && releaseDocTexts["docs/implementation-status.md"]?.includes("1.9MB source budget")
         && releaseDocTexts["docs/implementation-status.md"]?.includes("largest source file exceeds 90%")
         && releaseDocTexts["docs/implementation-status.md"]?.includes("largest runtime file exceeds 90%")
-        && releaseDocTexts["docs/release-candidate-process.md"]?.includes("1.16MB runtime budget")
-        && releaseDocTexts["docs/release-checklist.md"]?.includes("1.16MB runtime bytes")
+        && releaseDocTexts["docs/release-candidate-process.md"]?.includes("1.3MB runtime budget")
+        && releaseDocTexts["docs/release-checklist.md"]?.includes("1.3MB runtime bytes")
       ),
       expected: {}
     },
@@ -105,7 +105,7 @@ export function getChecksPart1(context) {
         && desktopHandoffLabels.slice(0, 4).every((label) => readmeDoc.includes(label))
         && ["README.md", "docs/release-checklist.md", "docs/sample-fixture-checklist.md", "docs/v0.1.0-release-plan.md", "docs/v0.1.0-release-notes.md"]
           .every((doc) => releaseDocTexts[doc]?.includes(desktopFixtureCloseWriteCommand))
-        && readmeDoc.includes("# Schema Docs (v0.1.2)")
+        && readmeDoc.includes("# Schema Docs (v0.1.3)")
         && readmeDoc.includes("Windows public-preview package")
         && readmeDoc.includes("Public preview scope")
         && readmeDoc.includes("packaged Node runtime resource")
@@ -279,8 +279,8 @@ export function getChecksPart1(context) {
         packageJson.scripts?.["release-artifacts"] === "node src/cli/release-artifacts.js"
         && releaseArtifactsCli.includes("sha256File")
         && releaseArtifactsCli.includes("src-tauri/target/release/app.exe")
-        && releaseArtifactsCli.includes("schema-docs_0.1.2_x64_en-US.msi")
-        && releaseArtifactsCli.includes("schema-docs_0.1.2_x64-setup.exe")
+        && releaseArtifactsCli.includes("schema-docs_0.1.3_x64_en-US.msi")
+        && releaseArtifactsCli.includes("schema-docs_0.1.3_x64-setup.exe")
         && releaseArtifactsCli.includes("sha256")
       ),
       expected: {
@@ -454,7 +454,7 @@ export function getChecksPart1(context) {
         && desktopVerificationRecord.includes("writeFile")
         && desktopVerificationRecord.includes("Generated partial record")
         && desktopVerificationTemplate?.recordType === "desktop-verification"
-        && desktopVerificationTemplate?.releaseTarget === "v0.1.2"
+        && desktopVerificationTemplate?.releaseTarget === "v0.1.3"
         && desktopVerificationTemplate?.visibleUi?.desktopDiagnostics
         && desktopVerificationTemplate?.visibleUi?.firstWorkflow
         && desktopVerificationTemplate?.visibleUi?.workspacePicker

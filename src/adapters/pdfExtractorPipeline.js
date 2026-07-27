@@ -16,11 +16,13 @@ if (!skippedDocumentTitle && line.startsWith("# ")) {
 skippedDocumentTitle = true;
 return false;
 }
+
 return !line.startsWith("> Source:") && !line.startsWith("> Converted by:");
 })
 .join("\n")
 .trim();
 }
+
 export function hasLowReadableText(markdown) {
 const text = pdfBodyText(markdown);
 if (!text) return true;
@@ -69,6 +71,7 @@ version: null
 };
 }
 }
+
 export async function runPdfExtractionPipeline(sourcePath, options = {}) {
 const preferred = options.preferredExtractor || "auto";
 const result = {
@@ -183,9 +186,15 @@ outputDir: options.markerOutputDir || ""
 detection: markerDetection,
 outputDir: options.markerOutputDir,
 markdownBaseDir: options.markerMarkdownBaseDir,
-forceOcr: options.markerForceOcr,
-timeoutMs: options.markerTimeoutMs
-});
+                    forceOcr: options.markerForceOcr === true,
+                    // Marker leaves inline mathematics as plain text unless its
+                    // inline-math pass is enabled. A mathematics textbook is
+                    // exactly the case this channel exists for, so the pass is
+                    // on by default and can still be turned off explicitly.
+                    inlineMath: options.markerInlineMath !== false,
+                    timeoutMs: options.markerTimeoutMs,
+                    onProgress: (message) => options.onProgress?.(message, 48)
+                  });
 const markerLowReadable = hasLowReadableText(markerResult.markdown);
 const markerSuccess = markerResult.markdown.trim() && !markerLowReadable;
 result.attempts.push({
@@ -242,7 +251,7 @@ extractedCharacters: 0,
 lowReadableText: false,
 warning: "Install the optional marker-pdf adapter for editable LaTeX equations, tables, and images"
 });
-result.warnings.push("Marker is not installed. The existing text extraction is preserved; editable LaTeX equations, formatted tables, and extracted images were not generated.");
+result.warnings.push("The optional developer-only Marker reconstruction runtime is unavailable. The Office workflow keeps the existing extraction and source-linked visual fallbacks; editable formula reconstruction was not attempted.");
 }
 }
 const layoutStart = Date.now();
@@ -287,7 +296,9 @@ result.lowReadableText = false;
 result.stats.characters = layoutResult.markdown.length;
 result.stats.semanticLoss = layoutSemanticLoss;
 result.visualMap = layoutResult.visualMap;
-result.warnings.push("Layout-aware PDF extraction preserved page markers and recovered mathematical glyphs that were damaged in the built-in text stream.");
+ result.warnings.push(layoutSemanticLoss.formulaDamageLikely
+ ? "Layout-aware PDF extraction improved the text layout, but mathematical font encoding is still damaged. Do not rely on formulas until a high-fidelity reconstruction is used."
+ : "Layout-aware PDF extraction preserved page markers and recovered mathematical glyphs that were damaged in the built-in text stream.");
 if (preferred === "scientific") {
 const recognized = layoutResult.visualMap?.summary?.formulaOcrRecognized || 0;
 const candidates = layoutResult.visualMap?.summary?.formulaOcrCandidates || 0;
@@ -671,7 +682,7 @@ result.lowReadableText = lowReadable;
 result.stats.characters = result.markdown.length;
 result.stats.semanticLoss = analyzePdfSemanticLoss(result.markdown);
 if (result.stats.semanticLoss.formulaDamageLikely) {
-result.warnings.push("Body text is readable, but mathematical formulas contain damaged font encoding. Install the optional pdfplumber adapter or use formula-region visual recovery before relying on formulas.");
+result.warnings.push("Body text is readable, but mathematical formulas contain damaged font encoding. The Office workflow preserves mapped formula regions as source-linked visuals; review them before relying on the document or sending it to AI.");
 }
 if (!result.textLayerDetected) {
 result.warnings.push("No readable text layer detected. OCR required.");

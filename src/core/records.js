@@ -2,7 +2,7 @@ import path from "node:path";
 import { copyFile, mkdir, stat, readdir, readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { createId, nowIso } from "./ids.js";
-import { readManifest, writeManifest } from "./manifest.js";
+import { openOrCreateWorkspace, readManifest, writeManifest } from "./manifest.js";
 import { AppError } from "./errors.js";
 import { appendTimelineEvent } from "./timeline.js";
 export function computeBufferHash(buffer) {
@@ -176,6 +176,10 @@ export async function importFileToWorkspace(workspacePath, sourcePath) {
   return record;
 }
 export async function importFileBufferToWorkspace(workspacePath, buffer, originalName) {
+  // Uploads can be the first request made against a persisted temporary
+  // workspace. Do not depend on the UI having opened it successfully first:
+  // ensure the manifest exists before accepting and recording the file.
+  await openOrCreateWorkspace(workspacePath);
   const classification = classifySource(originalName);
   const importedAt = nowIso();
   const copiedName = `${Date.now()}-${safeFileName(originalName)}`;

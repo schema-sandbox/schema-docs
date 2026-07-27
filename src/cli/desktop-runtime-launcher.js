@@ -49,7 +49,7 @@ const { port, server } = await listenWithFallback(preferredPort);
 const baseUrl = `http://${host}:${port}`;
 const session = {
   service: "schema-docs-local-api",
-  version: "0.1.2",
+  version: "0.1.3",
   baseUrl,
   port,
   host,

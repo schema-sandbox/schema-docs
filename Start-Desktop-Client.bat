@@ -2,6 +2,7 @@
 setlocal
 title Schema Docs - Desktop Tester
 cd /d "%~dp0"
+set "SCHEMA_DOCS_RUNTIME_SESSION_DIR=%~dp0.desktop-runtime-dev"
 
 where node.exe >nul 2>nul
 if errorlevel 1 (
@@ -66,8 +67,16 @@ if exist "%ProgramFiles%\Tesseract-OCR\tesseract.exe" (
 if exist "%LOCALAPPDATA%\SchemaDocs\tessdata\chi_sim.traineddata" (
   set "SCHEMA_DOCS_TESSDATA=%LOCALAPPDATA%\SchemaDocs\tessdata"
 )
-if exist "%LOCALAPPDATA%\SchemaDocs\marker-env\Scripts\marker_single.exe" (
+if exist "%USERPROFILE%\.schema-docs-marker\Scripts\marker_single.exe" (
+  set "SCHEMA_DOCS_MARKER=%USERPROFILE%\.schema-docs-marker\Scripts\marker_single.exe"
+) else if exist "%LOCALAPPDATA%\SchemaDocs\marker-env\Scripts\marker_single.exe" (
   set "SCHEMA_DOCS_MARKER=%LOCALAPPDATA%\SchemaDocs\marker-env\Scripts\marker_single.exe"
+)
+if not defined LLAMA_CPP_BINARY (
+  for %%L in ("%LOCALAPPDATA%\Microsoft\WinGet\Packages\ggml.llamacpp_*\llama-server.exe") do if exist "%%~fL" set "LLAMA_CPP_BINARY=%%~fL"
+)
+if not defined LLAMA_CPP_BINARY if exist "%LOCALAPPDATA%\Programs\Ollama\lib\ollama\llama-server.exe" (
+  set "LLAMA_CPP_BINARY=%LOCALAPPDATA%\Programs\Ollama\lib\ollama\llama-server.exe"
 )
 for /d %%D in ("%LOCALAPPDATA%\Microsoft\WinGet\Packages\oschwartz10612.Poppler_*") do (
   for /d %%P in ("%%~fD\poppler-*") do if exist "%%~fP\Library\bin\pdftoppm.exe" set "PATH=%%~fP\Library\bin;%PATH%"
@@ -95,7 +104,7 @@ echo   Schema Docs - Tauri Desktop Client Tester
 echo ====================================================
 echo Starting Tauri development server (tauri dev)...
 echo ====================================================
-npm run desktop:dev
+call npm run desktop:dev
 if errorlevel 1 (
   echo.
   echo ERROR: Schema Docs failed to start. Review the error above.

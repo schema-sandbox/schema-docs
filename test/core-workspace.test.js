@@ -157,16 +157,19 @@ test("exports handwritten markdown without removing user-authored blockquotes", 
   await openOrCreateWorkspace(workspace);
   const service = createAppService(workspace);
   const notePath = path.join("notes", "source-note.md");
-  await saveMarkdown(workspace, notePath, [
+  const source = [
+    "",
     "# Note",
     "",
     "> Source: user-authored citation",
     "",
-    "Body"
-  ].join("\n"));
+    "Body",
+    ""
+  ].join("\n");
+  await saveMarkdown(workspace, notePath, source);
   await service.exportMarkdownDocument(notePath, path.join("exports", "source-note.md"), "md");
   const exported = await readFile(path.join(workspace, "exports", "source-note.md"), "utf8");
-  assert.match(exported, /> Source: user-authored citation/);
+  assert.equal(exported, source);
 });
 test("rejects paths outside workspace", async () => {
   const workspace = await tempDir("lft-guard-");

@@ -250,7 +250,12 @@ function normalizePdfListLine(line) {
 }
 function tocLineToMarkdown(line) {
  const trimmed = String(line ?? "").trim();
- const match = /^(?<title>[\p{L}\p{N}][\p{L}\p{N}\s,:'"()&/\-]{2,}?)\s*\.{3,}\s*(?<page>\d{1,5})$/u.exec(trimmed);
+ // A PDF text layer renders dot leaders glyph by glyph, so the run arrives as
+ // ". . . . ." rather than "....."; both spellings have to be accepted or the
+ // leader survives into the Markdown. Anything after the page number is
+ // orphan glyph debris from the same baseline (a stray "*" or accent) and is
+ // dropped, since the entry itself is fully described by title and page.
+ const match = /^(?<title>[\p{L}\p{N}][\p{L}\p{N}\s,:'"()&/\-.]{2,}?)\s*(?:\.\s*){3,}[^\p{L}\p{N}]*(?<page>\d{1,5})\s*[^\p{L}\p{N}]*$/u.exec(trimmed);
 if (!match?.groups) return "";
 return `- ${match.groups.title.trim()} (p. ${match.groups.page})`;
 }
@@ -405,6 +410,7 @@ export async function pdfBufferToMarkdown(buffer, sourceName = "source.pdf") {
 }
 export const pdfMarkdownConverter = {
  name: "pdf-text-layer-converter",
+ cacheVersion: "3",
  canHandle(file) {
   return path.extname(file.sourcePath ?? file).toLowerCase() === ".pdf";
  },

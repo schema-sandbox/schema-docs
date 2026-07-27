@@ -1,3 +1,3 @@
-2467757f6b14d178ffe580f38f02094822879989ef83fe5bf22f642bd3be80b1  schema-docs_0.1.2_x64_en-US.msi
-206df6a5fd47c79410281bedfcf0ff4cdc951502da6f964d8091229cf5b60082  schema-docs_0.1.2_x64-setup.exe
-a2f428931862d80a64428b13b7a094fdfddacd96144abbab7e92a56ff96e3e68  schema-docs_0.1.2_x64-portable.zip
+8ccc757cb6ca84bfed233e36f0e038f3df01f26faff5717d2b548885fbabf228  schema-docs_0.1.3_x64_en-US.msi
+0dd6f56fbe8b5347e13c550630caf2766d8aa9170cb047916061c4bd86fe8662  schema-docs_0.1.3_x64-setup.exe
+4dc2ac11e3a82ad1c1e82c3166e0c03134e6560374bf1f86f3464799efe95bba  schema-docs_0.1.3_x64-portable.zip

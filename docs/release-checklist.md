@@ -32,7 +32,7 @@ npm run public-preview-package -- --json
 npm run rc-check -- --mode public-preview
 ```
 
-All commands should pass before a public v0.1.2 tag. Use `npm run release-readiness -- --report-only --out <readiness.json>` when an internal handoff needs an auditable JSON readiness report without changing release state. The default `npm run release-readiness` command must pass before tagging.
+All commands should pass before a public v0.1.3 tag. Use `npm run release-readiness -- --report-only --out <readiness.json>` when an internal handoff needs an auditable JSON readiness report without changing release state. The default `npm run release-readiness` command must pass before tagging.
 
 ## Scope Check
 
@@ -42,7 +42,7 @@ All commands should pass before a public v0.1.2 tag. Use `npm run release-readin
 - No full workspace upload.
 - No unsupported format advertised as supported.
 - No third-party dependency added without size and replacement notes.
-- `npm run size-check` stays under the enforced lightweight budgets: 0 runtime dependencies, at most 1 dev dependency, 1.16MB runtime bytes, 1.7MB source/test/docs bytes, 125KB largest runtime file, 100KB public browser module file, 100 runtime files, 195 checked source files, and 38,500 checked source lines.
+- `npm run size-check` stays under the enforced lightweight budgets: 0 runtime dependencies, at most 1 dev dependency, 1.3MB runtime bytes, 1.9MB source/test/docs bytes, 125KB largest runtime file, 100KB public browser module file, 100 runtime files, 195 checked source files, and 42,500 checked source lines.
 - `npm run demo` completes the public first-impression path: local workspace, sensitive document import, raw versus masked AI context, blocked raw send, AI handoff bundle, SDXP package verification, and automatic temporary workspace cleanup.
 - `npm run root-clean-check` passes before any public handoff so generated root-level artifacts are not shipped or shown to new contributors.
 - `npm run rc-check -- --mode public-preview` passes before tagging a public preview release candidate.
@@ -85,9 +85,9 @@ All commands should pass before a public v0.1.2 tag. Use `npm run release-readin
 - Synthetic fixtures are allowed; sensitive real documents are not committed.
 - `npm run fixture-smoke` writes `samples/fixture-results.json`; use `npm run fixture-smoke -- --out <fixture-results.json>` for trial runs that should not update tracked sample results.
 - `npm run fixture-check` passes for structure, coverage, plan/result ID alignment, result evidence, and notes on `known_limit`/`blocked`/`fail` results.
-- `npm run fixture-check -- --strict` passes before a public v0.1.2 tag.
+- `npm run fixture-check -- --strict` passes before a public v0.1.3 tag.
 - `npm run release-readiness -- --report-only --out <readiness.json>` can be archived during internal handoff when a tester needs the JSON readiness report.
-- `npm run release-readiness` reports `readyForPublicTag: true` and exits successfully before a public v0.1.2 tag.
+- `npm run release-readiness` reports `readyForPublicTag: true` and exits successfully before a public v0.1.3 tag.
 
 ## Desktop Shell
 
