@@ -130,7 +130,7 @@ test("desktop-release-preflight writes a handoff evidence package without launch
   assert.equal(handoffSummary.portableEvidence.handoff, "desktop-handoff.md");
   assert.equal(handoffSummary.portableEvidence.preflightManifest, "desktop-preflight-manifest.json");
   assert.ok(Object.values(handoffSummary.portableEvidence).every((filePath) => !path.isAbsolute(filePath)));
-  assert.ok(handoffSummary.artifacts.some((artifact) => artifact.path.endsWith("app.exe")));
+  assert.ok(handoffSummary.artifacts.some((artifact) => artifact.path.endsWith("app.exe") || artifact.path.endsWith("/app")));
   assert.equal(preflightManifest.manifestType, "desktop-preflight");
   assert.equal(preflightManifest.fileCount, 11);
   assert.ok(preflightManifest.files.every((file) => !path.isAbsolute(file.path)));
@@ -225,15 +225,17 @@ test("desktop-verification-fill creates a strict-checkable record from explicit 
   await mkdir(workspace, { recursive: true });
   const artifactsResult = await execFileAsync(process.execPath, [releaseArtifactsPath], { cwd: projectRoot });
   const artifactsManifest = JSON.parse(artifactsResult.stdout);
-  const appArtifact = artifactsManifest.artifacts.find((a) => a.path.endsWith("app.exe"));
+  const appArtifact = artifactsManifest.artifacts.find((a) => a.path.endsWith("app.exe") || a.path.endsWith("/app"));
   const actualHash = appArtifact?.sha256 || "95881102234c4bd0345b6d3ac39e89e1f9ae0bf89ea80e93d4e42786bd59a58d";
   const actualBytes = appArtifact?.bytes || 8725504;
+  const targetBinPath = process.platform === "win32" ? "src-tauri/target/release/app.exe" : "src-tauri/target/release/app";
+  const targetBinKind = process.platform === "win32" ? "app.exe" : "app";
   await writeFile(recordPath, JSON.stringify({
     releaseTarget: "v0.1.3",
     recordType: "desktop-verification",
     artifact: {
-      path: "src-tauri/target/release/app.exe",
-      kind: "app.exe",
+      path: targetBinPath,
+      kind: targetBinKind,
       bytes: actualBytes,
       sha256: actualHash
     },
@@ -375,15 +377,17 @@ test("desktop-verification-fill can fill visible UI evidence one step at a time"
   const partiallyFilledPath = path.join(workspace, "desktop-verification-record.partial-filled.json");
   const artifactsResult = await execFileAsync(process.execPath, [releaseArtifactsPath], { cwd: projectRoot });
   const artifactsManifest = JSON.parse(artifactsResult.stdout);
-  const appArtifact = artifactsManifest.artifacts.find((a) => a.path.endsWith("app.exe"));
+  const appArtifact = artifactsManifest.artifacts.find((a) => a.path.endsWith("app.exe") || a.path.endsWith("/app"));
   const actualHash = appArtifact?.sha256 || "95881102234c4bd0345b6d3ac39e89e1f9ae0bf89ea80e93d4e42786bd59a58d";
   const actualBytes = appArtifact?.bytes || 8725504;
+  const targetBinPath = process.platform === "win32" ? "src-tauri/target/release/app.exe" : "src-tauri/target/release/app";
+  const targetBinKind = process.platform === "win32" ? "app.exe" : "app";
   await writeFile(recordPath, JSON.stringify({
     releaseTarget: "v0.1.3",
     recordType: "desktop-verification",
     artifact: {
-      path: "src-tauri/target/release/app.exe",
-      kind: "app.exe",
+      path: targetBinPath,
+      kind: targetBinKind,
       bytes: actualBytes,
       sha256: actualHash
     },

@@ -113,7 +113,7 @@ test("release-artifacts reports build artifact checksums when present", async ()
   assert.equal(result.releaseTarget, "v0.1.3");
   assert.equal(result.generatedBy, "npm run release-artifacts");
   assert.equal(result.artifacts.length, 4);
-  assertArtifact(result, (artifact) => artifact.path.endsWith("app.exe"));
+  assertArtifact(result, (artifact) => artifact.path.endsWith("app.exe") || artifact.path.endsWith("/app"));
   assertArtifact(result, (artifact) => artifact.path.endsWith("schema-docs_0.1.3_x64-portable.zip"));
   for (const artifact of result.artifacts) {
     if (artifact.exists) {

@@ -113,12 +113,14 @@ test("desktop GUI smokes pass a requested start port to the packaged app", async
 });
 
 function desktopVerificationPassRecord({ bytes = 8725504, sha256 = "95881102234c4bd0345b6d3ac39e89e1f9ae0bf89ea80e93d4e42786bd59a58d" } = {}) {
+  const targetBinPath = process.platform === "win32" ? "src-tauri/target/release/app.exe" : "src-tauri/target/release/app";
+  const targetBinKind = process.platform === "win32" ? "app.exe" : "app";
   return {
     releaseTarget: "v0.1.3",
     recordType: "desktop-verification",
     artifact: {
-      path: "src-tauri/target/release/app.exe",
-      kind: "app.exe",
+      path: targetBinPath,
+      kind: targetBinKind,
       bytes,
       sha256
     },
@@ -356,7 +358,7 @@ test("desktop-verification-check validates template and strict pass records", as
   const recordPath = path.join(workspace, "desktop-verification-record.json");
   const artifactsResult = await execFileAsync(process.execPath, [releaseArtifactsPath], { cwd: projectRoot });
   const artifactsManifest = JSON.parse(artifactsResult.stdout);
-  const appArtifact = artifactsManifest.artifacts.find((a) => a.path.endsWith("app.exe"));
+  const appArtifact = artifactsManifest.artifacts.find((a) => a.path.endsWith("app.exe") || a.path.endsWith("/app"));
   const actualHash = appArtifact?.sha256 || "95881102234c4bd0345b6d3ac39e89e1f9ae0bf89ea80e93d4e42786bd59a58d";
   const actualBytes = appArtifact?.bytes || 8725504;
   await writeFile(recordPath, JSON.stringify(desktopVerificationPassRecord({ bytes: actualBytes, sha256: actualHash }), null, 2));
@@ -374,7 +376,7 @@ test("desktop-fixture-close only closes F-012 from a strict desktop verification
   const recordPath = path.join(workspace, "desktop-verification-record.json");
   const artifactsResult = await execFileAsync(process.execPath, [releaseArtifactsPath], { cwd: projectRoot });
   const artifactsManifest = JSON.parse(artifactsResult.stdout);
-  const appArtifact = artifactsManifest.artifacts.find((a) => a.path.endsWith("app.exe"));
+  const appArtifact = artifactsManifest.artifacts.find((a) => a.path.endsWith("app.exe") || a.path.endsWith("/app"));
   if (!appArtifact?.exists || !appArtifact.sha256) {
     t.skip("desktop release artifact has not been built");
     return;
