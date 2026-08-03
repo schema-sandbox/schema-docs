@@ -48,8 +48,9 @@ test("desktop-release-preflight writes a handoff evidence package without launch
   const fakeLauncher = path.join(fakeRuntime, "src", "cli", "desktop-runtime-launcher.js");
   const outDir = path.join(workspace, "preflight evidence");
   await mkdir(path.dirname(fakeLauncher), { recursive: true });
+  const nodeName = process.platform === "win32" ? "node.exe" : "node";
   await writeFile(fakeApp, "");
-  await writeFile(path.join(fakeRuntime, "node.exe"), "");
+  await writeFile(path.join(fakeRuntime, nodeName), "");
   await writeFile(path.join(fakeRuntime, "package.json"), "{}");
   await writeFile(fakeLauncher, "");
   await mkdir(path.join(fakeRuntime, "public"), { recursive: true });

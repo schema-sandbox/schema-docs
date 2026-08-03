@@ -39,8 +39,9 @@ async function createPackagedLayout(prefix) {
   const runtimeRoot = path.join(workspace, "runtime");
   const launcher = path.join(runtimeRoot, "src", "cli", "desktop-runtime-launcher.js");
   await mkdir(path.dirname(launcher), { recursive: true });
+  const nodeName = process.platform === "win32" ? "node.exe" : "node";
   await writeFile(appPath, "");
-  await writeFile(path.join(runtimeRoot, "node.exe"), "");
+  await writeFile(path.join(runtimeRoot, nodeName), "");
   await writeFile(path.join(runtimeRoot, "package.json"), "{}");
   await writeFile(launcher, "");
   await mkdir(path.join(runtimeRoot, "public"), { recursive: true });
@@ -226,7 +227,8 @@ test("desktop packaged-app checks accept an executable with the complete runtime
 test("desktop bridge smoke selects runtime node.exe when it is bundled", async () => {
   const workspace = await mkdtemp(path.join(os.tmpdir(), "schema-docs-bundled-node-"));
   const runtimeRoot = path.join(workspace, "runtime");
-  const bundledNode = path.join(runtimeRoot, "node.exe");
+  const nodeName = process.platform === "win32" ? "node.exe" : "node";
+  const bundledNode = path.join(runtimeRoot, nodeName);
   await mkdir(runtimeRoot, { recursive: true });
   await cp(path.join(projectRoot, "src"), path.join(runtimeRoot, "src"), { recursive: true });
   await writeFile(path.join(runtimeRoot, "package.json"), JSON.stringify({ type: "module" }));

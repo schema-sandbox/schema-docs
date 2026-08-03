@@ -10,10 +10,13 @@ function argValue(name, fallback) {
   return index >= 0 && process.argv[index + 1] ? process.argv[index + 1] : fallback;
 }
 
+const exeName = process.platform === "win32" ? "app.exe" : "app";
+const nodeName = process.platform === "win32" ? "node.exe" : "node";
+
 const checkOnly = process.argv.includes("--check-only");
 const appPath = path.resolve(argValue(
   "--app",
-  path.join(root, "src-tauri", "target", "release", "app.exe")
+  path.join(root, "src-tauri", "target", "release", exeName)
 ));
 const host = "127.0.0.1";
 const startPort = Number(argValue("--start-port", process.env.SCHEMA_DOCS_DESKTOP_PORT ?? 4177));
@@ -24,7 +27,7 @@ const fetchBlockedPorts = new Set([4190, 5060, 5061, 6000, 6566, 6665, 6666, 666
 function inspectPackagedRuntime(executablePath) {
   const runtimeRoot = path.join(path.dirname(executablePath), "runtime");
   const requiredFiles = {
-    node: path.join(runtimeRoot, "node.exe"),
+    node: path.join(runtimeRoot, nodeName),
     packageJson: path.join(runtimeRoot, "package.json"),
     launcher: path.join(runtimeRoot, "src", "cli", "desktop-runtime-launcher.js"),
     publicIndex: path.join(runtimeRoot, "public", "index.html"),

@@ -19,7 +19,8 @@ const runtimeRoot = path.resolve(argValue(
 const port = Number(argValue("--port", process.env.SCHEMA_DOCS_DESKTOP_PORT ?? 18160));
 const launcher = path.join(runtimeRoot, "src", "cli", "desktop-runtime-launcher.js");
 const packageJson = path.join(runtimeRoot, "package.json");
-const bundledNode = path.join(runtimeRoot, "node.exe");
+const nodeName = process.platform === "win32" ? "node.exe" : "node";
+const bundledNode = path.join(runtimeRoot, nodeName);
 const isBundled = existsSync(bundledNode);
 const nodePath = isBundled ? bundledNode : process.execPath;
 const requiredFiles = {

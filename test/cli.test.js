@@ -58,7 +58,8 @@ async function addFakePackagedRuntime(appPath) {
   const runtimeRoot = path.join(path.dirname(appPath), "runtime");
   const launcher = path.join(runtimeRoot, "src", "cli", "desktop-runtime-launcher.js");
   await mkdir(path.dirname(launcher), { recursive: true });
-  await writeFile(path.join(runtimeRoot, "node.exe"), "");
+  const nodeName = process.platform === "win32" ? "node.exe" : "node";
+  await writeFile(path.join(runtimeRoot, nodeName), "");
   await writeFile(path.join(runtimeRoot, "package.json"), "{}");
   await writeFile(launcher, "");
   await mkdir(path.join(runtimeRoot, "public"), { recursive: true });

@@ -43,7 +43,8 @@ async function readHealth(baseUrl) {
 }
 
 function launchPackagedApp() {
-  const appPath = path.join(root, "src-tauri", "target", "release", "app.exe");
+  const exeName = process.platform === "win32" ? "app.exe" : "app";
+  const appPath = path.join(root, "src-tauri", "target", "release", exeName);
   const child = spawn(appPath, [], {
     detached: true,
     stdio: "ignore",
