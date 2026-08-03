@@ -4,8 +4,9 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const root = path.resolve(import.meta.dirname, "../..");
+const targetBin = process.platform === "win32" ? "src-tauri/target/release/app.exe" : "src-tauri/target/release/app";
 const artifactPaths = [
-  "src-tauri/target/release/app.exe",
+  targetBin,
   "release/windows/schema-docs_0.1.3_x64_en-US.msi",
   "release/windows/schema-docs_0.1.3_x64-setup.exe",
   "release/windows/schema-docs_0.1.3_x64-portable.zip"

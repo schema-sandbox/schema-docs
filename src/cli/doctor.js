@@ -60,12 +60,13 @@ async function main() {
     console.log(`[FAIL] Workspace directory is not writable: ${error.message}`);
   }
 
-  const binPath = path.join(root, "src-tauri/target/release/app.exe");
+  const binName = process.platform === "win32" ? "app.exe" : "app";
+  const binPath = path.join(root, "src-tauri/target/release", binName);
   try {
     const fileStat = await stat(binPath);
-    console.log(`[OK] Desktop app installer artifact found: app.exe (${fileStat.size} bytes)`);
+    console.log(`[OK] Desktop app installer artifact found: ${binName} (${fileStat.size} bytes)`);
   } catch {
-    console.log("[WARN] Desktop app installer artifact not found: app.exe");
+    console.log(`[WARN] Desktop app installer artifact not found: ${binName}`);
   }
 
   try {
