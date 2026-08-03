@@ -40,7 +40,7 @@ function formulaOcrPython(options = {}) {
   if (options.formulaOcrPython) return options.formulaOcrPython;
   if (process.env.SCHEMA_DOCS_FORMULA_OCR_PYTHON) return process.env.SCHEMA_DOCS_FORMULA_OCR_PYTHON;
   const marker = process.env.SCHEMA_DOCS_MARKER || "";
-  if (/marker_single(?:\.exe)?$/i.test(marker)) return path.join(path.dirname(marker), "python.exe");
+  if (/marker_single(?:\.exe)?$/i.test(marker)) return path.join(path.dirname(marker), process.platform === "win32" ? "python.exe" : "python");
   return "";
 }
 

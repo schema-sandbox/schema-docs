@@ -76,7 +76,7 @@ const ignoredGeneratedContentPatterns = [
 ];
 
 function normalizePath(filePath) {
-  return filePath.split(path.sep).join("/");
+  return String(filePath || "").replace(/\\/g, "/");
 }
 
 function hasDefaultEnglishBoundary(relativePath) {
