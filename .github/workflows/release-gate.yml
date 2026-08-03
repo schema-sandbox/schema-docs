@@ -1,0 +1,36 @@
+name: Release Gate
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  public-preview:
+    name: Verify public-preview tag readiness
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run automated tests
+        run: npm test
+
+      - name: Run automatic release checks
+        run: npm run release-check
+
+      - name: Require public-preview readiness
+        run: npm run release-readiness -- --mode public-preview --json

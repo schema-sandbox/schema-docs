@@ -61,7 +61,8 @@ Thumbs.db
 # Local review reports and oversized manual fixtures are not public source files
 /github_readiness_report.md
 /self_test_report.md
-/docs/客户视角全面测试报告_*.md
+# Local dated/versioned customer regression reports are not public source files
+/docs/*_????-??-??_v*.md
 /test-fixtures/manual-smoke/long.md
 
 # Internal strategy and roadmap documents (not for public release)

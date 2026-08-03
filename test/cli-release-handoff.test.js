@@ -472,6 +472,10 @@ test("release-check validates desktop runtime bridge and current size budget", a
       writes: "--out <readiness.json>",
       desktopArtifactGate: "filled record artifact SHA-256 must match npm run release-artifacts before F-012 closure"
     },
+    release_tag_gate_workflow_present: {
+      trigger: "v* tags",
+      commands: ["npm test", "npm run release-check", "npm run release-readiness -- --mode public-preview --json"]
+    },
     public_preview_sample_report_current: {
       sampleMinimum: 20,
       requiredCapabilities: ["ai_intake", "safety_gate", "format_exchange", "table_filter", "long_input", "external_refresh"],

@@ -16,6 +16,7 @@ export function getChecksPart1(context) {
     releaseReadinessCli,
     releaseArtifactsCli,
     releaseArtifactsIndexCli,
+    releaseGateWorkflow,
     privateBetaPackageCli,
     betaCheckCli,
     rcCheckCli,
@@ -96,6 +97,21 @@ export function getChecksPart1(context) {
       name: "release_docs_present",
       ok: requiredDocs.every(fileExists),
       requiredDocs
+    },
+    {
+      name: "release_tag_gate_workflow_present",
+      ok: Boolean(
+        releaseGateWorkflow.includes("tags:")
+        && releaseGateWorkflow.includes('- "v*"')
+        && releaseGateWorkflow.includes("npm test")
+        && releaseGateWorkflow.includes("npm run release-check")
+        && releaseGateWorkflow.includes("npm run release-readiness -- --mode public-preview --json")
+        && releaseGateWorkflow.includes("contents: read")
+      ),
+      expected: {
+        trigger: "v* tags",
+        commands: ["npm test", "npm run release-check", "npm run release-readiness -- --mode public-preview --json"]
+      }
     },
     {
       name: "release_docs_text_integrity",

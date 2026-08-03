@@ -363,7 +363,7 @@ See [`docs/v0.1.0-release-notes.md`](docs/v0.1.0-release-notes.md) for the v0.1.
 
 ## Launch Assets
 
-See [`docs/github-release-draft-v0.1.0.md`](docs/github-release-draft-v0.1.0.md) for release copy, Show HN title options, and tester feedback prompts.
+See [`docs/v0.1.3-release-notes.md`](docs/v0.1.3-release-notes.md) for the current release summary and known limits.
 
 ---
 

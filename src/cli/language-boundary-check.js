@@ -53,7 +53,6 @@ const allowedMultilingualPatterns = [
   /^technical_roadmap\.md$/,
   /^test\/manual\/external-sync\.mjs$/,
   /^src\/core\/dlp-rules\.json$/,
-  /^docs\/github-release-draft-v0\.1\.0\.md$/,
   /^docs\/v0\.1\.3-release-notes\.md$/,
   /^docs\/public-preview-manual-test-checklist\.md$/,
   /^docs\/public-preview-sample-report\.md$/,

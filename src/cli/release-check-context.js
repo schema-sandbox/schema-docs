@@ -36,6 +36,7 @@ export async function loadReleaseCheckContext() {
   const fixtureSmoke = await readText("src/cli/fixture-smoke.js");
   const sizeCheckCli = await readText("src/cli/size-check.js");
   const cleanupArtifactsCli = await readText("src/cli/cleanup-artifacts.js");
+  const releaseGateWorkflow = await readText(".github/workflows/release-gate.yml");
   const externalSyncScenario = await readText("test/manual/external-sync.mjs");
   const desktopVerificationCheck = await readText("src/cli/desktop-verification-check.js");
   const desktopVerificationRecord = await readText("src/cli/desktop-verification-record.js");
@@ -257,6 +258,7 @@ export async function loadReleaseCheckContext() {
     recordsCore,
     releaseArtifactsCli,
     releaseArtifactsIndexCli,
+    releaseGateWorkflow,
     releaseDocsCombined,
     releaseDocTexts,
     releaseReadinessCli,

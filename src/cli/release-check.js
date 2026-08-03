@@ -76,20 +76,6 @@ function scriptExistenceCheck(name, source, scripts) {
   };
 }
 
-function formatBytesForReleaseDraft(bytes) {
-  return Number(bytes).toLocaleString("en-US");
-}
-
-function releaseDraftIncludesArtifact(draft, artifact) {
-  const name = artifact.path.split(/[\\/]/).pop();
-  return Boolean(
-    artifact.exists
-    && draft.includes(`\`${name}\``)
-    && draft.includes(`${formatBytesForReleaseDraft(artifact.bytes)} bytes`)
-    && draft.includes(`\`${artifact.sha256}\``)
-  );
-}
-
 async function auditWindowsReleaseChecksums() {
   let checksumText = "";
   let readError = null;
@@ -178,37 +164,6 @@ async function auditWindowsReleaseChecksums() {
     }
   };
 }
-
-checks.push({
-  name: "github_release_draft_artifacts_current",
-  ok: Boolean(
-    githubReleaseArtifacts.length === githubReleaseArtifactPaths.size
-      && (
-        existingGithubReleaseArtifactCount === 0
-        || (
-          existingGithubReleaseArtifactCount === githubReleaseArtifactPaths.size
-          && githubReleaseArtifacts.every((artifact) => releaseDraftIncludesArtifact(
-            releaseDocTexts["docs/github-release-draft-v0.1.3.md"] ?? "",
-            artifact
-          ))
-        )
-      )
-  ),
-  expected: {
-    docs: ["docs/github-release-draft-v0.1.3.md"],
-    verifies: [
-      "source checkout may contain zero release assets",
-      "a partial release asset set fails",
-      "complete artifact name, byte count, and SHA-256 match"
-    ]
-  },
-  actual: githubReleaseArtifacts.map((artifact) => ({
-    path: artifact.path,
-    exists: artifact.exists,
-    bytes: artifact.bytes,
-    sha256: artifact.sha256
-  }))
-});
 
 const windowsReleaseChecksumAudit = await auditWindowsReleaseChecksums();
 checks.push({
