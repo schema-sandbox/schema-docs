@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { prepareReleaseRuntime } from "../scripts/prepare-release.js";
+import { prepareReleaseRuntime, stageReleaseRuntime } from "../scripts/prepare-release.js";
 
 async function writeFixture(filePath, content) {
   await mkdir(path.dirname(filePath), { recursive: true });
@@ -27,5 +27,11 @@ test("prepareReleaseRuntime removes source Python caches and stale packaged runt
   await assert.rejects(stat(path.join(root, "src", "adapters", "stray.pyo")), { code: "ENOENT" });
   await assert.rejects(stat(path.join(root, "src-tauri", "target", "release", "runtime")), { code: "ENOENT" });
   assert.equal(await readFile(result.targetNodePath, "utf8"), "node-runtime");
+  await writeFixture(path.join(root, "public", "app.js"), "desktop-ui");
+  await writeFixture(path.join(root, "package.json"), "{}");
+  const staged = await stageReleaseRuntime({ rootDir: root });
+  assert.equal(await readFile(path.join(staged.runtimeDir, "src", "adapters", "module.py"), "utf8"), "print('ok')\n");
+  assert.equal(await readFile(path.join(staged.runtimeDir, "public", "app.js"), "utf8"), "desktop-ui");
+  assert.equal(await readFile(path.join(staged.runtimeDir, "node.exe"), "utf8"), "node-runtime");
   await rm(root, { recursive: true, force: true });
 });

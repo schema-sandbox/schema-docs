@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readdir, rm, stat } from "node:fs/promises";
+import { copyFile, cp, mkdir, readdir, rm, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import path from "node:path";
@@ -83,8 +83,26 @@ export async function prepareReleaseRuntime({ rootDir = root, nodeExecutable = p
   return { targetNodePath, staleRuntimeDir, removedPythonCaches };
 }
 
+export async function stageReleaseRuntime({ rootDir = root } = {}) {
+  const runtimeDir = path.join(rootDir, "src-tauri", "target", "release", "runtime");
+  await rm(runtimeDir, { recursive: true, force: true });
+  await mkdir(runtimeDir, { recursive: true });
+  await Promise.all([
+    cp(path.join(rootDir, "src"), path.join(runtimeDir, "src"), { recursive: true }),
+    cp(path.join(rootDir, "public"), path.join(runtimeDir, "public"), { recursive: true }),
+    copyFile(path.join(rootDir, "package.json"), path.join(runtimeDir, "package.json")),
+    copyFile(path.join(rootDir, "src-tauri", "resources", "node.exe"), path.join(runtimeDir, "node.exe"))
+  ]);
+  return { runtimeDir };
+}
+
 async function main() {
   try {
+    if (process.argv.includes("--stage-runtime")) {
+      const result = await stageReleaseRuntime();
+      console.log(`Staged packaged runtime: ${result.runtimeDir}`);
+      return;
+    }
     console.log(`Locating node executable: ${process.execPath}`);
     const result = await prepareReleaseRuntime();
     console.log(`Prepared packaged Node executable: ${result.targetNodePath}`);

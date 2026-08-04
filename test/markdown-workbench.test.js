@@ -340,54 +340,29 @@ test("segment navigation clears a stale banner outside a segmented document", as
 
 test("external Markdown open and save use the Tauri v2 internal bridge without HTTP fallback", async () => {
   const source = await readFile(path.join(projectRoot, "public", "app.js"), "utf8");
-  const tauriInvokeSource = source.slice(
-    source.indexOf("function tauriInvoke("),
-    source.indexOf("async function bindDesktopAiSummonEvent(")
-  );
-  const externalAccessSource = source.slice(
-    source.indexOf("async function readExternalMarkdownFile("),
-    source.indexOf("function currentMarkdownContent(")
-  );
-  assert.ok(tauriInvokeSource.startsWith("function tauriInvoke("));
-  assert.ok(externalAccessSource.startsWith("async function readExternalMarkdownFile("));
-
-  const nativeCalls = [];
-  let httpCalls = 0;
+  const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end));
+  const invokeSource = section("function tauriInvoke(", "async function bindDesktopAiSummonEvent(");
+  const accessSource = section("async function readExternalMarkdownFile(", "function currentMarkdownContent(");
+  const calls = [];
   const context = {
-    window: {
-      __TAURI_INTERNALS__: {
-        invoke: async (command, args) => {
-          nativeCalls.push({ command, args });
-          return command === "read_authorized_markdown_file" ? "# Direct external Markdown" : { saved: true };
-        }
-      }
-    },
-    api: async () => {
-      httpCalls += 1;
-      throw new Error("external Markdown must not use the public HTTP API");
-    }
+    window: { __TAURI_INTERNALS__: { invoke: async (command, args) => {
+      calls.push({ command, args });
+      return command.startsWith("read_") ? "# Direct external Markdown" : true;
+    } } },
+    api: async () => { throw new Error("unexpected external HTTP request"); }
   };
-  vm.runInNewContext([
-    tauriInvokeSource,
-    externalAccessSource,
-    "globalThis.externalMarkdownAccess = { readExternalMarkdownFile, saveExternalMarkdownFile };"
-  ].join("\n"), context);
+  vm.runInNewContext(`${invokeSource}\n${accessSource}\nglobalThis.access = { readExternalMarkdownFile, saveExternalMarkdownFile };`, context);
 
   const sourcePath = "C:\\Users\\tester\\notes\\direct.md";
-  const content = await context.externalMarkdownAccess.readExternalMarkdownFile(sourcePath);
-  const saved = await context.externalMarkdownAccess.saveExternalMarkdownFile(sourcePath, "updated");
-  assert.equal(content, "# Direct external Markdown");
-  assert.equal(saved.saved, true);
-  assert.equal(httpCalls, 0);
-  assert.equal(nativeCalls.length, 2);
-  assert.equal(nativeCalls[0].command, "read_authorized_markdown_file");
-  assert.equal(nativeCalls[0].args.sourcePath, sourcePath);
-  assert.equal(nativeCalls[1].command, "save_authorized_markdown_file");
-  assert.equal(nativeCalls[1].args.sourcePath, sourcePath);
-  assert.equal(nativeCalls[1].args.content, "updated");
+  assert.equal(await context.access.readExternalMarkdownFile(sourcePath), "# Direct external Markdown");
+  await context.access.saveExternalMarkdownFile(sourcePath, "updated");
+  assert.deepEqual(calls.map(({ command, args }) => [command, args.sourcePath, args.content]), [
+    ["read_authorized_markdown_file", sourcePath, undefined],
+    ["save_authorized_markdown_file", sourcePath, "updated"]
+  ]);
   assert.equal("__TAURI__" in context.window, false);
 
   assert.match(source, /const content = await readExternalMarkdownFile\(selected\);/);
   assert.match(source, /isExternalMarkdownPath\(relativePath\)[\s\S]*?await readExternalMarkdownFile\(relativePath\)/);
-  assert.doesNotMatch(externalAccessSource, /\/api\/markdown\/(?:read|save)-external/);
+  assert.doesNotMatch(accessSource, /\/api\/markdown\/(?:read|save)-external/);
 });
