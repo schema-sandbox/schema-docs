@@ -18,7 +18,10 @@ function reconstruct(components) {
     "spec.loader.exec_module(module)",
     "print(module.reconstruct_formula_latex(json.loads(sys.stdin.read())))"
   ].join(";");
-  const result = spawnSync("python", ["-c", script, extractorPath], {
+  // Formula reconstruction is pure Python and must stay usable when the
+  // optional pdfplumber adapter is not installed. Isolated mode plus -S keeps
+  // this regression check independent of user and system site-packages.
+  const result = spawnSync("python", ["-I", "-S", "-X", "utf8", "-c", script, extractorPath], {
     cwd: repoRoot,
     input: JSON.stringify(components),
     encoding: "utf8",

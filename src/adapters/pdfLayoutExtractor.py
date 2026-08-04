@@ -8,12 +8,6 @@ import sys
 from pathlib import Path
 
 try:
-    import pdfplumber
-except ImportError:
-    print("pdfplumber is not installed", file=sys.stderr)
-    sys.exit(3)
-
-try:
     from .pdfInlineMath import (
         CID_ENCODING_FALLBACK,
         CID_FONT_MAP,
@@ -2019,6 +2013,12 @@ def render_visual_regions(page, page_number, regions, asset_dir, allow_reuse=Fal
 
 
 def main():
+    try:
+        import pdfplumber
+    except ImportError:
+        print("pdfplumber is not installed", file=sys.stderr)
+        sys.exit(3)
+
     parser = argparse.ArgumentParser()
     parser.add_argument("source")
     parser.add_argument("markdown_output")
