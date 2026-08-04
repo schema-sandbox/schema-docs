@@ -1249,13 +1249,15 @@ test("PDF Pipeline Phase 2: preferredExtractor, diagnostics JSON, and retry over
 
   const freshDiag = JSON.parse(await readFile(freshDoc.pdfDiagnosticsPath, "utf8"));
   const freshPdftotextAtt = freshDiag.extractorAttempts.find(a => a.name === "pdftotext");
-  if (freshPdftotextAtt.status === "success") {
-    assert.equal(retryJob.status, "succeeded");
+  if (retryJob.status === "succeeded") {
+    assert.ok(freshPdftotextAtt);
+    assert.equal(freshPdftotextAtt.status, "success");
     assert.equal(freshDiag.chosenExtractor, "pdftotext");
   } else {
     assert.equal(retryJob.status, "failed");
     assert.equal(retryJob.error.code, "document_extraction_fallback_preserved");
     assert.equal(freshDiag.chosenExtractor, "built-in");
+    if (freshPdftotextAtt) assert.notEqual(freshPdftotextAtt.status, "success");
     assert.equal(freshDoc.lastExtractedHash, beforeRetryHash);
     assert.equal(freshDoc.extractorName, beforeRetryExtractor);
     assert.equal(await readFile(freshDoc.outputMarkdownPath, "utf8"), beforeRetryMarkdown);
