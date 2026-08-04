@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { cp, copyFile, link, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, copyFile, link, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { KATEX_WOFF2_FONT_FILES } from "../src/core/katexRuntimeAssets.js";
 import {
   desktopAppSmokePath,
@@ -241,6 +241,9 @@ test("desktop bridge smoke selects runtime node.exe when it is bundled", async (
     await link(process.execPath, bundledNode);
   } catch {
     await copyFile(process.execPath, bundledNode);
+    if (process.platform !== "win32") {
+      await chmod(bundledNode, 0o755);
+    }
   }
   try {
     const result = await runCliJson(desktopBridgeSmokePath, ["--runtime-root", runtimeRoot, "--port", "18261"]);
