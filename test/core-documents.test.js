@@ -1236,11 +1236,13 @@ test("PDF Pipeline Phase 2: preferredExtractor, diagnostics JSON, and retry over
   const builtInAtt = diagnostics.extractorAttempts.find(a => a.name === "built-in");
   assert.ok(builtInAtt);
   assert.equal(builtInAtt.status, "success");
+  const beforeRetryMarkdown = await readFile(doc.outputMarkdownPath, "utf8");
+  const beforeRetryHash = doc.lastExtractedHash;
+  const beforeRetryExtractor = doc.extractorName;
 
   const service = createAppService(workspace);
 
   const retryJob = await service.retryDocumentExtraction(record.id, "pdftotext");
-  assert.equal(retryJob.status, "succeeded");
 
   const freshManifest = await readManifest(workspace);
   const freshDoc = freshManifest.documents.find((d) => d.id === record.id);
@@ -1248,10 +1250,15 @@ test("PDF Pipeline Phase 2: preferredExtractor, diagnostics JSON, and retry over
   const freshDiag = JSON.parse(await readFile(freshDoc.pdfDiagnosticsPath, "utf8"));
   const freshPdftotextAtt = freshDiag.extractorAttempts.find(a => a.name === "pdftotext");
   if (freshPdftotextAtt.status === "success") {
+    assert.equal(retryJob.status, "succeeded");
     assert.equal(freshDiag.chosenExtractor, "pdftotext");
   } else {
+    assert.equal(retryJob.status, "failed");
+    assert.equal(retryJob.error.code, "document_extraction_fallback_preserved");
     assert.equal(freshDiag.chosenExtractor, "built-in");
-    assert.equal(freshPdftotextAtt.status, "unavailable");
+    assert.equal(freshDoc.lastExtractedHash, beforeRetryHash);
+    assert.equal(freshDoc.extractorName, beforeRetryExtractor);
+    assert.equal(await readFile(freshDoc.outputMarkdownPath, "utf8"), beforeRetryMarkdown);
   }
 });
 
