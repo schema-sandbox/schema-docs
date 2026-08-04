@@ -11,6 +11,7 @@ export const requiredDocs = [
   "docs/release-candidate-process.md",
   "docs/v0.1.0-release-plan.md",
   "docs/v0.1.0-release-notes.md",
+  "docs/v0.1.4-release-notes.md",
   "docs/private-beta-checklist.md",
   "docs/public-preview-manual-test-checklist.md",
   "docs/demo-flow.md",
@@ -37,9 +38,9 @@ export const desktopHandoffLabels = [
 ];
 
 export const expectedTestSummary = {
-  badge: "tests-380%20passing%20%2F%201%20skipped",
-  readme: "381 automated",
-  docs: "381 tests, 380 pass, 1 skipped"
+  badge: "tests-387%20passing%20%2F%201%20skipped",
+  readme: "388 automated",
+  docs: "388 tests, 387 pass, 1 skipped"
 };
 
 export const requiredScripts = [

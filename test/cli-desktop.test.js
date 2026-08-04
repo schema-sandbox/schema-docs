@@ -116,7 +116,7 @@ function desktopVerificationPassRecord({ bytes = 8725504, sha256 = "95881102234c
   const targetBinPath = process.platform === "win32" ? "src-tauri/target/release/app.exe" : "src-tauri/target/release/app";
   const targetBinKind = process.platform === "win32" ? "app.exe" : "app";
   return {
-    releaseTarget: "v0.1.3",
+    releaseTarget: "v0.1.4",
     recordType: "desktop-verification",
     artifact: {
       path: targetBinPath,

@@ -34,6 +34,7 @@ const ERROR_GUIDANCE = {
   csv_empty: "Import a CSV with headers and data rows.",
   document_corrupt: "Save a fresh DOCX copy and try again.",
   document_converter_not_found: "Try importing as another format.",
+  document_extraction_empty: "The previous Markdown was kept. Choose Auto or an installed extractor, then retry.",
   document_not_found: "Select a document or import a file.",
   exchange_audit_not_found: "Open a package with an audit trail.",
   exchange_document_frontmatter_invalid: "Regenerate the exchange MD (closed frontmatter).",

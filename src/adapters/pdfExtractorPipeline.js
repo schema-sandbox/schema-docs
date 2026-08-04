@@ -7,7 +7,7 @@ import { analyzePdfSemanticLoss, detectPdfLayoutExtractor, extractPdfWithLayout 
 import { detectPdfOcrAdapter, extractPdfWithOcr } from "./pdfOcrExtractor.js";
 import { detectPdfMarkerExtractor, extractPdfWithMarker } from "./pdfMarkerExtractor.js";
 const execFileAsync = promisify(execFile);
-function pdfBodyText(markdown) {
+export function pdfBodyText(markdown) {
 let skippedDocumentTitle = false;
 return markdown
 .split(/\r?\n/)
@@ -94,17 +94,30 @@ const baseName = path.basename(sourcePath);
 if (options.onProgress) {
 options.onProgress("Detecting PDF text layer", 10);
 }
-const builtInStart = Date.now();
+let builtInStart = 0;
 let builtInMarkdown = "";
 let builtInError = "";
 let hasText = false;
 let lowReadable = false;
 let builtInRan = false;
 let builtInSemanticLoss = analyzePdfSemanticLoss("");
-if (preferred === "auto" || preferred === "built-in" || preferred === "marker" || preferred === "scientific") {
+const recordBuiltInAttempt = (attempt) => {
+const existingIndex = result.attempts.findIndex((entry) => entry.name === "built-in");
+if (existingIndex >= 0) {
+result.attempts[existingIndex] = attempt;
+} else {
+result.attempts.push(attempt);
+}
+};
+const runBuiltInExtraction = async ({ lateFallback = false } = {}) => {
+if (builtInRan) return;
 builtInRan = true;
+builtInStart = Date.now();
 if (options.onProgress) {
-options.onProgress("Trying built-in extractor", 25);
+options.onProgress(
+lateFallback ? "Preferred extractor unavailable; preserving built-in extraction" : "Trying built-in extractor",
+lateFallback ? 94 : 25
+);
 }
 try {
 if (options.converter && typeof options.converter.convert === "function") {
@@ -116,7 +129,7 @@ result.warnings.push(...convResult.warnings);
 } else {
 builtInMarkdown = await pdfBufferToMarkdown(buffer, baseName);
 }
-hasText = !builtInMarkdown.includes("no simple text layer");
+hasText = Boolean(pdfBodyText(builtInMarkdown)) && !builtInMarkdown.includes("no simple text layer");
 lowReadable = hasText && hasLowReadableText(builtInMarkdown);
 builtInSemanticLoss = analyzePdfSemanticLoss(builtInMarkdown);
 result.stats.semanticLoss = builtInSemanticLoss;
@@ -127,7 +140,7 @@ lowReadable = true;
 }
 const duration = Date.now() - builtInStart;
 const status = hasText ? (lowReadable ? "low_readable" : "success") : "failed";
-result.attempts.push({
+recordBuiltInAttempt({
 name: "built-in",
 available: true,
 status,
@@ -136,6 +149,9 @@ extractedCharacters: builtInMarkdown.length,
 lowReadableText: lowReadable,
 warning: builtInError || (status === "low_readable" ? "Low-readable text detected" : "")
 });
+};
+if (preferred === "auto" || preferred === "built-in" || preferred === "marker" || preferred === "scientific") {
+await runBuiltInExtraction();
 if (hasText && !lowReadable && !builtInSemanticLoss.formulaDamageLikely && preferred !== "marker" && preferred !== "scientific") {
 result.markdown = builtInMarkdown;
 result.extractorName = "built-in";
@@ -639,35 +655,47 @@ warning: "Tesseract, pdftoppm, and pdfinfo are required for local PDF OCR"
 });
 }
 }
+const preferredTextAttempt = preferred === "pdftotext"
+? { ran: pdftotextRan, markdown: pdftotextMarkdown, name: "pdftotext" }
+: preferred === "mutool"
+? { ran: mutoolRan, markdown: mutoolMarkdown, name: "mutool" }
+: preferred === "pandoc"
+? { ran: pandocRan, markdown: pandocMarkdown, name: "pandoc" }
+: null;
+const preferredTextRecord = preferredTextAttempt
+? result.attempts.find((attempt) => attempt.name === preferredTextAttempt.name)
+: null;
+const preferredTextHasOutput = Boolean(
+preferredTextAttempt?.ran
+&& pdfBodyText(preferredTextAttempt.markdown)
+&& preferredTextRecord?.status !== "failed"
+&& preferredTextRecord?.status !== "unavailable"
+);
+if (preferred !== "auto"
+&& preferred !== "built-in"
+&& !builtInRan
+&& !result.markdown.trim()
+&& !preferredTextHasOutput) {
+await runBuiltInExtraction({ lateFallback: true });
+const requestedAttemptName = preferred === "ocr"
+? "tesseract-ocr"
+: (preferred === "scientific" ? "pdfplumber" : preferred);
+const requestedStatus = result.attempts.find((attempt) => attempt.name === requestedAttemptName)?.status || "no usable output";
+result.warnings.push(`Requested ${preferred} extractor did not produce usable Markdown (${requestedStatus}). Built-in extraction was preserved instead.`);
+}
 if (options.onProgress) {
 options.onProgress("Building readable Markdown", 95);
 }
 if (preferred !== "auto" && preferred !== "built-in") {
-if (preferred === "pdftotext" && pdftotextRan) {
-const preferredAttempt = result.attempts.find(a => a.name === "pdftotext");
-if (preferredAttempt && preferredAttempt.status !== "failed") {
-result.markdown = pdftotextMarkdown;
-result.extractorName = "pdftotext";
+let preferredTextSelected = false;
+if (preferredTextHasOutput) {
+result.markdown = preferredTextAttempt.markdown;
+result.extractorName = preferredTextAttempt.name;
 result.textLayerDetected = true;
-result.lowReadableText = preferredAttempt.lowReadableText;
+result.lowReadableText = preferredTextRecord.lowReadableText;
+preferredTextSelected = true;
 }
-} else if (preferred === "mutool" && mutoolRan) {
-const preferredAttempt = result.attempts.find(a => a.name === "mutool");
-if (preferredAttempt && preferredAttempt.status !== "failed") {
-result.markdown = mutoolMarkdown;
-result.extractorName = "mutool";
-result.textLayerDetected = true;
-result.lowReadableText = preferredAttempt.lowReadableText;
-}
-} else if (preferred === "pandoc" && pandocRan) {
-const preferredAttempt = result.attempts.find(a => a.name === "pandoc");
-if (preferredAttempt && preferredAttempt.status !== "failed") {
-result.markdown = pandocMarkdown;
-result.extractorName = "pandoc";
-result.textLayerDetected = true;
-result.lowReadableText = preferredAttempt.lowReadableText;
-}
-} else {
+if (!preferredTextSelected) {
 result.markdown = builtInMarkdown;
 result.extractorName = "built-in";
 result.textLayerDetected = hasText;

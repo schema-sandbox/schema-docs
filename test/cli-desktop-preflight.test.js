@@ -231,7 +231,7 @@ test("desktop-verification-fill creates a strict-checkable record from explicit 
   const targetBinPath = process.platform === "win32" ? "src-tauri/target/release/app.exe" : "src-tauri/target/release/app";
   const targetBinKind = process.platform === "win32" ? "app.exe" : "app";
   await writeFile(recordPath, JSON.stringify({
-    releaseTarget: "v0.1.3",
+    releaseTarget: "v0.1.4",
     recordType: "desktop-verification",
     artifact: {
       path: targetBinPath,
@@ -383,7 +383,7 @@ test("desktop-verification-fill can fill visible UI evidence one step at a time"
   const targetBinPath = process.platform === "win32" ? "src-tauri/target/release/app.exe" : "src-tauri/target/release/app";
   const targetBinKind = process.platform === "win32" ? "app.exe" : "app";
   await writeFile(recordPath, JSON.stringify({
-    releaseTarget: "v0.1.3",
+    releaseTarget: "v0.1.4",
     recordType: "desktop-verification",
     artifact: {
       path: targetBinPath,

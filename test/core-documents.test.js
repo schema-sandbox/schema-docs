@@ -485,6 +485,100 @@ test("converts generated pdf through document job flow", async () => {
   const qualityReport = JSON.parse(await readFile(document.outputMarkdownPath.replace(/\.md$/, ".quality.json"), "utf8"));
   assert.ok(qualityReport.matchedKnownLimits.includes("pdf_rich_objects_unsupported"));
 });
+test("PDF retry keeps built-in Markdown when an optional extractor is unavailable", async () => {
+  const workspace = await tempDir("pdf-optional-fallback-");
+  const pdfPath = path.join(workspace, "fallback.pdf");
+  await writeFile(pdfPath, markdownToPdfBuffer("# Fallback\n\nReadable built-in text remains available."));
+  const baseline = "# Fallback\n\nReadable built-in text remains available.";
+  const unavailableOptions = {
+    mockPdfLayoutAvailable: false,
+    mockPdftotextAvailable: false,
+    mockMutoolAvailable: false,
+    mockPandocAvailable: false,
+    mockOcrAvailable: false
+  };
+
+  const retryCases = [
+    ...["pdfplumber", "pdftotext", "mutool", "pandoc", "ocr"].map((name) => [name, {}]),
+    ["pdftotext", { mockPdftotextAvailable: true, mockPdftotext: "" }],
+    ["mutool", { mockMutoolAvailable: true, mockMutool: "" }],
+    ["pandoc", { mockPandocAvailable: true, mockPandoc: "" }]
+  ];
+  for (const [preferredExtractor, overrides] of retryCases) {
+    const result = await runPdfExtractionPipeline(pdfPath, {
+      preferredExtractor,
+      converter: { convert: async () => ({ markdown: baseline, warnings: [] }) },
+      ...unavailableOptions,
+      ...overrides
+    });
+    assert.equal(result.extractorName, "built-in", preferredExtractor);
+    assert.equal(result.markdown, baseline, preferredExtractor);
+    assert.equal(result.attempts.find((attempt) => attempt.name === "built-in").status, "success", preferredExtractor);
+    assert.ok(
+      result.warnings.some((warning) => warning.includes(`Requested ${preferredExtractor} extractor did not produce usable Markdown`)),
+      preferredExtractor
+    );
+  }
+});
+test("PDF retry still honors an available explicitly selected pdfplumber extractor", async () => {
+  const workspace = await tempDir("pdf-explicit-layout-");
+  const pdfPath = path.join(workspace, "layout.pdf");
+  await writeFile(pdfPath, markdownToPdfBuffer("# Layout\n\nSource text."));
+  const layoutMarkdown = "# Layout\n\nLayout-aware extraction remains selected.";
+  const result = await runPdfExtractionPipeline(pdfPath, {
+    preferredExtractor: "pdfplumber",
+    converter: { convert: async () => assert.fail("built-in must remain a late fallback") },
+    mockPdfLayoutAvailable: true,
+    mockPdfLayout: layoutMarkdown,
+    mockPdftotextAvailable: false,
+    mockMutoolAvailable: false,
+    mockPandocAvailable: false,
+    mockOcrAvailable: false
+  });
+  assert.equal(result.extractorName, "pdfplumber");
+  assert.equal(result.markdown, layoutMarkdown);
+  assert.equal(result.attempts.find((attempt) => attempt.name === "pdfplumber").status, "success");
+  assert.equal(result.attempts.find((attempt) => attempt.name === "built-in").status, "unavailable");
+});
+test("PDF retry refuses to replace an existing extraction with empty Markdown", async () => {
+  const workspace = await tempDir("pdf-empty-retry-guard-");
+  await openOrCreateWorkspace(workspace);
+  const pdfPath = path.join(workspace, "guarded.pdf");
+  await writeFile(pdfPath, markdownToPdfBuffer("# Guarded\n\nKeep this extraction."));
+  const record = await importFileToWorkspace(workspace, pdfPath);
+  const firstJob = await convertDocumentToMarkdownAsJob(workspace, record.id, pdfMarkdownConverter);
+  assert.equal(firstJob.status, "succeeded");
+  const beforeManifest = await readManifest(workspace);
+  const beforeDocument = beforeManifest.documents.find((candidate) => candidate.id === record.id);
+  const beforeMarkdown = await readFile(beforeDocument.outputMarkdownPath, "utf8");
+  const emptyConverter = {
+    name: "pdf-empty-test-converter",
+    cacheVersion: "1",
+    canHandle: (document) => document.sourceType === "pdf",
+    convert: async () => ({ markdown: "", warnings: [] })
+  };
+
+  const retryJob = await convertDocumentToMarkdownAsJob(workspace, record.id, emptyConverter, {
+    force: true,
+    preferredExtractor: "pdfplumber"
+  });
+  assert.equal(retryJob.status, "failed");
+  assert.equal(retryJob.error.code, "document_extraction_empty");
+  assert.equal(await readFile(beforeDocument.outputMarkdownPath, "utf8"), beforeMarkdown);
+  const afterManifest = await readManifest(workspace);
+  const afterDocument = afterManifest.documents.find((candidate) => candidate.id === record.id);
+  assert.equal(afterDocument.outputMarkdownPath, beforeDocument.outputMarkdownPath);
+});
+test("non-PDF retry accepts valid heading-only Markdown", async () => {
+  const workspace = await tempDir("heading-only-retry-");
+  await openOrCreateWorkspace(workspace);
+  const source = path.join(workspace, "heading.txt");
+  await writeFile(source, "source", "utf8");
+  const record = await importFileToWorkspace(workspace, source);
+  const converter = { name: "heading-only", canHandle: () => true, convert: async () => ({ markdown: "# Heading", warnings: [] }) };
+  const job = await convertDocumentToMarkdownAsJob(workspace, record.id, converter, { force: true, preferredExtractor: "auto" });
+  assert.equal(job.status, "succeeded");
+});
 test("low-readable pdf extraction recommends OCR before AI send", async () => {
   const workspace = await tempDir("lft-garbled-pdf-");
   await openOrCreateWorkspace(workspace);

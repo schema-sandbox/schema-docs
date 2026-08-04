@@ -6,6 +6,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const SOURCE_DIRS = ["src", "test", "docs"];
 const RUNTIME_DIRS = ["src/core", "src/server", "src/adapters", "src/sdk", "public"];
 const IGNORED_SOURCE_PATTERNS = [
+  /^docs\/(?:release-artifact-index|[^/]+-package)\.md$/,
   /^docs\/.*\u6d4b\u8bd5\u62a5\u544a.*\.md$/u,
   /^docs\/.*\u5ba2\u6237\u89c6\u89d2.*\.md$/u
 ];

@@ -4,7 +4,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { readManifest, writeManifest } from "./manifest.js";
 import { AppError } from "./errors.js";
-import { runPdfExtractionPipeline } from "../adapters/pdfExtractorPipeline.js";
+import { pdfBodyText, runPdfExtractionPipeline } from "../adapters/pdfExtractorPipeline.js";
 export function calculateTextMetrics(markdown) {
 const charsExtracted = markdown.length;
 const replacementCharCount = (markdown.match(/\ufffd/g) || []).length;
@@ -452,6 +452,17 @@ const outputPath = path.join(workspacePath, "outputs", outputName);
 const readablePath = path.join(workspacePath, "outputs", "readable", `${baseName}.readable.md`);
 const readableSegmentBaseName = `${baseName}.readable`;
 const existingContent = await readFile(outputPath, "utf8").catch(() => "");
+if (options.force === true
+&& options.preferredExtractor
+&& (typeof result.markdown !== "string" || (document.sourceType === "pdf"
+? !pdfBodyText(result.markdown) || result.textLayerDetected === false
+: !result.markdown.trim()))) {
+throw new AppError(
+"document_extraction_empty",
+"The requested extractor did not produce usable Markdown. The previous extraction was kept unchanged.",
+{ documentId, preferredExtractor: options.preferredExtractor }
+);
+}
 let userEdited = false;
 if (existingContent && document.lastExtractedHash) {
 const existingHash = computeBufferHash(Buffer.from(existingContent, "utf8"));
@@ -758,7 +769,8 @@ message: "Converting document"
 });
 const result = await convertDocumentToMarkdown(workspacePath, documentId, converter, {
 update,
-preferredExtractor: options.preferredExtractor
+preferredExtractor: options.preferredExtractor,
+force: options.force === true
 });
 await update({
 progress: 90,

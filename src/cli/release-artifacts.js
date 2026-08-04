@@ -7,9 +7,9 @@ const root = path.resolve(import.meta.dirname, "../..");
 const targetBin = process.platform === "win32" ? "src-tauri/target/release/app.exe" : "src-tauri/target/release/app";
 const artifactPaths = [
   targetBin,
-  "release/windows/schema-docs_0.1.3_x64_en-US.msi",
-  "release/windows/schema-docs_0.1.3_x64-setup.exe",
-  "release/windows/schema-docs_0.1.3_x64-portable.zip"
+  "release/windows/schema-docs_0.1.4_x64_en-US.msi",
+  "release/windows/schema-docs_0.1.4_x64-setup.exe",
+  "release/windows/schema-docs_0.1.4_x64-portable.zip"
 ];
 
 async function sha256File(filePath) {
@@ -43,7 +43,7 @@ export async function describeReleaseArtifact(relativePath) {
 
 export async function buildReleaseArtifactManifest() {
   return {
-    releaseTarget: "v0.1.3",
+    releaseTarget: "v0.1.4",
     generatedBy: "npm run release-artifacts",
     artifacts: await Promise.all(artifactPaths.map(describeReleaseArtifact))
   };

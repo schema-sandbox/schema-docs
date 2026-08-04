@@ -38,9 +38,9 @@ checks.push({
 });
 const desktopArtifacts = (await buildReleaseArtifactManifest()).artifacts;
 const githubReleaseArtifactPaths = new Set([
-  "release/windows/schema-docs_0.1.3_x64_en-US.msi",
-  "release/windows/schema-docs_0.1.3_x64-setup.exe",
-  "release/windows/schema-docs_0.1.3_x64-portable.zip"
+  "release/windows/schema-docs_0.1.4_x64_en-US.msi",
+  "release/windows/schema-docs_0.1.4_x64-setup.exe",
+  "release/windows/schema-docs_0.1.4_x64-portable.zip"
 ]);
 const githubReleaseArtifacts = desktopArtifacts.filter((artifact) => githubReleaseArtifactPaths.has(artifact.path));
 const existingGithubReleaseArtifactCount = githubReleaseArtifacts.reduce(
@@ -248,7 +248,7 @@ checks.push(
 
 const result = {
   version: packageJson.version,
-  releaseTarget: "v0.1.3",
+  releaseTarget: "v0.1.4",
   automaticChecksPassed: checks.every((check) => check.ok),
   checks,
   manualGate,

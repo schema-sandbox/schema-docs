@@ -1,55 +1,47 @@
-# Packaging and Installer Selection for Testers
+# Windows Packages for Testers
 
-This guide outlines available Windows build packages, system runtime requirements, and setup instructions.
+## Package choice
 
-## 1. Distribution Formats
+| File | Use |
+| --- | --- |
+| `schema-docs_0.1.4_x64-portable.zip` | No-install testing. Extract the entire ZIP and keep `app.exe` beside `runtime/`. |
+| `schema-docs_0.1.4_x64-setup.exe` | Recommended interactive Windows installer. |
+| `schema-docs_0.1.4_x64_en-US.msi` | Enterprise, silent, or managed deployment. |
 
-| Package Name | File Type | Size | Intended Audience & Recommendations |
-|--------------|-----------|------|-------------------------------------|
-| `schema-docs_0.1.3_x64-portable.zip` | Portable ZIP | ~34.9MB | Extract the whole ZIP for no-install testing; keep `app.exe` beside `runtime/`. |
-| `schema-docs_0.1.3_x64-setup.exe` | NSIS Setup Bundle | ~23.8MB | Normal manual testing and standard installer path. |
-| `schema-docs_0.1.3_x64_en-US.msi` | MSI Deployment Package | ~35.0MB | Enterprise deployment, silent network installations, and bulk rollouts. |
+The build-tree `app.exe` is not a standalone release: it needs the sibling `runtime/` directory. Distribute the portable ZIP or an installer.
 
-The build-tree `app.exe` is not a standalone distribution file. It requires the generated sibling `runtime/` directory, so release operators should distribute the portable ZIP or an installer instead of copying the EXE alone.
+## Requirements and sanity check
 
-## 2. Runtime Modes & Node Dependency
-- **Packaged Runtime Bridge:** The Windows package includes `runtime/node.exe` and uses it to start the local background server. System Node is only a fallback if the bundled runtime resource is missing.
-- **WebView2 Requirement:** Windows 10/11 requires the Microsoft WebView2 Evergreen Runtime installed (installed by default on modern Windows).
+- The package includes `runtime/node.exe`; system Node is only a fallback if that resource is missing.
+- Windows 10/11 needs Microsoft WebView2 Evergreen Runtime, normally already installed.
 
-## 3. Environment Diagnosis & Setup Verification
-After installing, perform these sanity steps:
-1. Click **Desktop diagnostics** on the main topbar.
-2. Confirm the diagnostics status reports `Node: v22+`, `isBundled: true`, and `API Health: 200`.
-3. If the bundled runtime fails to start, capture Desktop diagnostics and session logs before trying system Node fallback.
+After installation:
 
-## 4. Release Operator Shortcut
+1. Open **Desktop diagnostics** from the top bar.
+2. Confirm `Node: v22+`, `isBundled: true`, and `API Health: 200`.
+3. If startup fails, capture diagnostics and session logs before trying system Node.
 
-Build first, then prepare the three uploadable Windows assets:
+## Release operator commands
 
 ```bash
 npm run desktop:build
 npm run release:windows:prepare
 ```
 
-`release:windows:prepare` does not run a build. It requires the completed Tauri build tree, checks that `package.json` and `src-tauri/tauri.conf.json` use the same version, verifies the packaged runtime and documentation files, and atomically refreshes the MSI, NSIS installer, portable ZIP, and `release/windows/SHA256SUMS.txt`. A failed validation or compression leaves the previously prepared assets unchanged.
+`release:windows:prepare` requires a completed Tauri build. It checks matching versions in `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`; verifies runtime and docs; then atomically refreshes the MSI, NSIS, portable ZIP, and `release/windows/SHA256SUMS.txt`. Failure leaves prior assets unchanged.
 
-Before handing the prepared build to testers, run:
+Before tester handoff, run:
 
 ```bash
 npm run release:public-preview
 ```
 
-This runs the public-preview RC gate and refreshes:
+This runs the public-preview RC gate and refreshes the artifact index and package reports under `docs/` and `samples/`.
 
-- `docs/release-artifact-index.md`
-- `samples/release-artifact-index.json`
-- `docs/public-preview-package.md`
-- `samples/public-preview-package.json`
+## Troubleshooting
 
-## 5. Common Diagnostics and Resolutions
-
-| Symptom | Cause | Resolution |
-|---------|-------|------------|
-| Black screens or blank launcher | Missing WebView2 | Install Microsoft Edge WebView2 runtime. |
-| Port conflict warnings | Port 4177 is in use | The system will automatically fallback to 4178-4199. Try reloading the client. |
-| Workspace access denied | File location security gate | Ensure files are located inside your active workspace directories. |
+| Symptom | Resolution |
+| --- | --- |
+| Blank launcher | Install Microsoft Edge WebView2 Runtime. |
+| Port 4177 busy | The app automatically tries ports 4178–4199; reload the client. |
+| Workspace access denied | Keep files inside the active workspace. |

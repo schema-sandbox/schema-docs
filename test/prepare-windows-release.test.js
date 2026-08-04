@@ -14,12 +14,17 @@ async function writeFixture(filePath, content) {
   await writeFile(filePath, content);
 }
 
-async function createBuildTree(root, { packageVersion = "0.1.0", tauriVersion = packageVersion } = {}) {
+async function createBuildTree(root, {
+  packageVersion = "0.1.0",
+  tauriVersion = packageVersion,
+  cargoVersion = packageVersion
+} = {}) {
   await writeFixture(path.join(root, "package.json"), JSON.stringify({ version: packageVersion }));
   await writeFixture(path.join(root, "src-tauri", "tauri.conf.json"), JSON.stringify({
     version: tauriVersion,
     productName: "schema-docs"
   }));
+  await writeFixture(path.join(root, "src-tauri", "Cargo.toml"), `[package]\nname = "app"\nversion = "${cargoVersion}"\n`);
   const releaseDir = path.join(root, "src-tauri", "target", "release");
   await writeFixture(path.join(releaseDir, "app.exe"), "fake-app");
   for (const relativePath of REQUIRED_RUNTIME_FILES) {
@@ -100,9 +105,42 @@ test("prepareWindowsRelease rejects package and Tauri version drift before publi
   await createBuildTree(root, { tauriVersion: "0.1.1" });
   await assert.rejects(
     prepareWindowsRelease({ root, compressArchive: fakeArchive }),
-    /Version mismatch: package\.json=0\.1\.0, tauri\.conf\.json=0\.1\.1/
+    /Version mismatch: package\.json=0\.1\.0, tauri\.conf\.json=0\.1\.1, Cargo\.toml=0\.1\.0/
   );
   await assert.rejects(readdir(path.join(root, "release", "windows")), { code: "ENOENT" });
+  await rm(root, { recursive: true, force: true });
+});
+
+test("prepareWindowsRelease rejects Cargo package version drift before publishing", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "schema-docs-release-cargo-version-test-"));
+  await createBuildTree(root, { cargoVersion: "0.1.1" });
+  await assert.rejects(
+    prepareWindowsRelease({ root, compressArchive: fakeArchive }),
+    /Version mismatch: package\.json=0\.1\.0, tauri\.conf\.json=0\.1\.0, Cargo\.toml=0\.1\.1/
+  );
+  await assert.rejects(readdir(path.join(root, "release", "windows")), { code: "ENOENT" });
+  await rm(root, { recursive: true, force: true });
+});
+
+test("prepareWindowsRelease rejects Python cache artifacts without replacing existing assets", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "schema-docs-release-cache-test-"));
+  const tempRoot = path.join(root, "temp");
+  await mkdir(tempRoot);
+  await createBuildTree(root);
+  await writeFixture(
+    path.join(root, "src-tauri", "target", "release", "runtime", "src", "adapters", "__pycache__", "adapter.cpython-312.pyc"),
+    "cache"
+  );
+  const outputDir = path.join(root, "release", "windows");
+  await mkdir(outputDir, { recursive: true });
+  await writeFixture(path.join(outputDir, "SHA256SUMS.txt"), "existing-checksums\n");
+
+  await assert.rejects(
+    prepareWindowsRelease({ root, tempRoot, compressArchive: fakeArchive }),
+    /Forbidden runtime artifacts: src\/adapters\/__pycache__\/adapter\.cpython-312\.pyc/
+  );
+  assert.equal(await readFile(path.join(outputDir, "SHA256SUMS.txt"), "utf8"), "existing-checksums\n");
+  assert.deepEqual(await readdir(tempRoot), []);
   await rm(root, { recursive: true, force: true });
 });
 

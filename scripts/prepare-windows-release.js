@@ -52,6 +52,11 @@ function portablePath(filePath) {
   return filePath.split(path.sep).join("/");
 }
 
+export function isForbiddenRuntimeArtifact(relativePath) {
+  const normalized = portablePath(String(relativePath || ""));
+  return normalized.split("/").includes("__pycache__") || /\.py[co]$/i.test(normalized);
+}
+
 async function readJson(filePath) {
   return JSON.parse(await readFile(filePath, "utf8"));
 }
@@ -114,6 +119,10 @@ async function listRegularFiles(directoryPath, relativeBase = "") {
 
 async function copyRuntimeVerified(sourcePath, targetPath) {
   const sourceFiles = await listRegularFiles(sourcePath);
+  const forbiddenFiles = sourceFiles.filter(isForbiddenRuntimeArtifact);
+  if (forbiddenFiles.length) {
+    throw new Error(`Forbidden runtime artifacts: ${forbiddenFiles.map(portablePath).join(", ")}`);
+  }
   await cp(sourcePath, targetPath, { recursive: true, errorOnExist: true, force: false });
   const targetFiles = await listRegularFiles(targetPath);
   assertSameList(sourceFiles, targetFiles, "Runtime file list changed while copying");
@@ -213,8 +222,10 @@ export async function prepareWindowsRelease({
 } = {}) {
   const packageJson = await readJson(path.join(root, "package.json"));
   const tauriConfig = await readJson(path.join(root, "src-tauri", "tauri.conf.json"));
-  if (!packageJson.version || packageJson.version !== tauriConfig.version) {
-    throw new Error(`Version mismatch: package.json=${packageJson.version ?? "missing"}, tauri.conf.json=${tauriConfig.version ?? "missing"}`);
+  const cargoToml = await readFile(path.join(root, "src-tauri", "Cargo.toml"), "utf8");
+  const cargoVersion = cargoToml.match(/^version\s*=\s*"([^"]+)"/m)?.[1] || null;
+  if (!packageJson.version || packageJson.version !== tauriConfig.version || packageJson.version !== cargoVersion) {
+    throw new Error(`Version mismatch: package.json=${packageJson.version ?? "missing"}, tauri.conf.json=${tauriConfig.version ?? "missing"}, Cargo.toml=${cargoVersion ?? "missing"}`);
   }
   if (!tauriConfig.productName) {
     throw new Error("src-tauri/tauri.conf.json is missing productName.");

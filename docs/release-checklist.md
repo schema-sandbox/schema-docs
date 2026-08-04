@@ -32,7 +32,7 @@ npm run public-preview-package -- --json
 npm run rc-check -- --mode public-preview
 ```
 
-All commands should pass before a public v0.1.3 tag. Use `npm run release-readiness -- --report-only --out <readiness.json>` when an internal handoff needs an auditable JSON readiness report without changing release state. The default `npm run release-readiness` command must pass before tagging.
+All commands should pass before a public v0.1.4 tag. Use `npm run release-readiness -- --report-only --out <readiness.json>` when an internal handoff needs an auditable JSON readiness report without changing release state. The default `npm run release-readiness` command must pass before tagging.
 
 ## Scope Check
 
@@ -85,9 +85,9 @@ All commands should pass before a public v0.1.3 tag. Use `npm run release-readin
 - Synthetic fixtures are allowed; sensitive real documents are not committed.
 - `npm run fixture-smoke` writes `samples/fixture-results.json`; use `npm run fixture-smoke -- --out <fixture-results.json>` for trial runs that should not update tracked sample results.
 - `npm run fixture-check` passes for structure, coverage, plan/result ID alignment, result evidence, and notes on `known_limit`/`blocked`/`fail` results.
-- `npm run fixture-check -- --strict` passes before a public v0.1.3 tag.
+- `npm run fixture-check -- --strict` passes before a public v0.1.4 tag.
 - `npm run release-readiness -- --report-only --out <readiness.json>` can be archived during internal handoff when a tester needs the JSON readiness report.
-- `npm run release-readiness` reports `readyForPublicTag: true` and exits successfully before a public v0.1.3 tag.
+- `npm run release-readiness` reports `readyForPublicTag: true` and exits successfully before a public v0.1.4 tag.
 
 ## Desktop Shell
 
@@ -114,7 +114,7 @@ All commands should pass before a public v0.1.3 tag. Use `npm run release-readin
 - Packaged Desktop UI `Choose local file` opens a Windows native file picker and fills the import path field.
 - The shell loads the same local UI and does not bypass workspace path checks.
 - Desktop commands stay thin and call the app service boundary rather than format adapters directly.
-- A user can complete workspace selection, import, conversion/export, exchange package creation, package read-back, and receiver/trust report generation from the desktop path before public v0.1.0.
+- A user can complete workspace selection, import, conversion/export, exchange package creation, package read-back, and receiver/trust report generation from the desktop path before public v0.1.4.
 
 ## User-Facing Clarity
 

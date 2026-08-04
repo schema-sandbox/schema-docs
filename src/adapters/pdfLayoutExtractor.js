@@ -46,7 +46,10 @@ function formulaOcrPython(options = {}) {
 
 async function runPython(candidate, args, options = {}) {
   const commandArgs = candidate.args ? [...candidate.args, ...args] : args;
-  return execFileAsync(candidate.command, commandArgs, options);
+  return execFileAsync(candidate.command, commandArgs, {
+    ...options,
+    env: { ...process.env, ...options.env, PYTHONDONTWRITEBYTECODE: "1" }
+  });
 }
 
 export async function detectPdfLayoutExtractor(options = {}) {
@@ -129,7 +132,7 @@ export async function extractPdfWithLayout(sourcePath, options = {}) {
         timeout: options.formulaOcrTimeoutMs || 24 * 60 * 60 * 1000,
         maxBuffer: 16 * 1024 * 1024,
         windowsHide: true,
-        env: { ...process.env, PYTHONIOENCODING: "utf-8" }
+        env: { ...process.env, PYTHONIOENCODING: "utf-8", PYTHONDONTWRITEBYTECODE: "1" }
       });
       formulaOcr = String(ocrResult.stdout || "").trim().split(/\r?\n/).at(-1) || "";
     }

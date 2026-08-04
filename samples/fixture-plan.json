@@ -1,5 +1,5 @@
 {
-  "releaseTarget": "v0.1.3",
+  "releaseTarget": "v0.1.4",
   "policy": {
     "allowSensitiveFiles": false,
     "minimumWorkflowCount": 10,
@@ -44,7 +44,7 @@
       "path": "CLI/API/SDK",
       "expected": "PDF file is generated with extractable text",
       "status": "planned",
-      "notes": "visual pagination is not the v0.1.3 gate"
+      "notes": "visual pagination is not the v0.1.4 gate"
     },
     {
       "id": "F-005",
