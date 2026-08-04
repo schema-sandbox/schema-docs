@@ -355,7 +355,10 @@ async function showEditorWarningsForRecord(record) {
  if (state.advancedToolsVisible && record.sourceType === "pdf" && record.extractionQuality?.formulaDamageLikely) {
   const markerRetryBtn = miniActionButton("Developer: rebuild math with Marker", "#dc2626", async () => {
    showAlert("info", "Starting local full-page mathematical reconstruction. Large books remain open while each phase completes.");
-   const result = await api("/api/document/retry-extraction", { documentId: record.id, preferredExtractor: "marker" });
+   const result = assertSuccessfulJob(
+    await api("/api/document/retry-extraction", { documentId: record.id, preferredExtractor: "marker" }),
+    "Marker reconstruction failed."
+   );
    await refreshManifest();
    refreshTimeline();
    refreshVersions();
@@ -682,6 +685,12 @@ async function readApiPayload(response, url) {
   throw new Error(guidance ? `${code}: ${msg} - ${guidance}` : `${code}: ${msg}`);
  }
  return payload.data;
+}
+function assertSuccessfulJob(job, fallbackMessage = "Operation failed.") {
+ if (job?.status !== "failed") return job;
+ const failure = job.error ?? {};
+ const guidance = failure.guidance ? ` - ${failure.guidance}` : "";
+ throw new Error(`${failure.code || "job_failed"}: ${failure.message || fallbackMessage}${guidance}`);
 }
 async function run(action) {
  const e = window.event;
@@ -1953,6 +1962,7 @@ const manifestPanel = createManifestPanel({
  pill,
  escapeHtml,
  run,
+ assertSuccessfulJob,
  showAlert,
  exchangePackagePanel,
  aiContextPanel,

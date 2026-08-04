@@ -151,6 +151,14 @@ if (sourceType === "pdf") return { mode: "direct", quality: "basic-text-layer", 
 if (sourceType === "docx") return { mode: "direct", quality: "basic", limits: ["styles", "annotations", "revisions"] };
 return { mode: "direct", quality: "basic", limits: ["layout"] };
 }
+function requestedPdfExtractorSucceeded(result, preferredExtractor) {
+const preferred = String(preferredExtractor || "").trim().toLowerCase();
+if (!preferred || preferred === "auto" || preferred === "built-in") return true;
+const expectedExtractor = preferred === "ocr" ? "tesseract-ocr" : preferred;
+return result?.extractorName === expectedExtractor
+&& result?.textLayerDetected !== false
+&& result?.lowReadableText !== true;
+}
 async function reusableMarkdownExtraction(document, converter) {
 const converterVersion = String(converter.cacheVersion || "1");
 if (
@@ -161,6 +169,7 @@ document.status !== "ready"
 || document.extractionConverterName !== converter.name
 || document.extractionConverterVersion !== converterVersion
 || document.extractionQuality?.lowReadableText
+|| (document.sourceType === "pdf" && document.extractionQuality?.textLayerDetected === false)
 || document.quality?.hasOcrMissing
 || (document.warnings && document.warnings.some((w) => w.includes("Low-readable")))
 ) {
@@ -176,7 +185,8 @@ const markdownHash = computeBufferHash(Buffer.from(markdown, "utf8"));
 const readableMarkdownHash = computeBufferHash(Buffer.from(readableMarkdown, "utf8"));
 const expectedSourceHash = document.sourceHash ? `sha256:${document.sourceHash}` : "";
 if (
-markdownHash === document.lastExtractedHash
+(document.sourceType !== "pdf" || Boolean(pdfBodyText(markdown)))
+&& markdownHash === document.lastExtractedHash
 && (!document.lastReadableExtractedHash || readableMarkdownHash === document.lastReadableExtractedHash)
 && (!expectedSourceHash || currentSourceHash === expectedSourceHash)
 ) {
@@ -461,6 +471,21 @@ throw new AppError(
 "document_extraction_empty",
 "The requested extractor did not produce usable Markdown. The previous extraction was kept unchanged.",
 { documentId, preferredExtractor: options.preferredExtractor }
+);
+}
+if (options.force === true
+&& document.sourceType === "pdf"
+&& pdfBodyText(existingContent)
+&& !requestedPdfExtractorSucceeded(result, options.preferredExtractor)) {
+throw new AppError(
+"document_extraction_fallback_preserved",
+`The requested ${options.preferredExtractor} extractor did not produce usable Markdown. The previous extraction was kept unchanged.`,
+{
+documentId,
+preferredExtractor: options.preferredExtractor,
+previousExtractor: document.extractorName || "",
+fallbackExtractor: result.extractorName || ""
+}
 );
 }
 let userEdited = false;

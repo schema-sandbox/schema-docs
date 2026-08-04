@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { openOrCreateWorkspace, readManifest } from "../src/core/manifest.js";
+import { openOrCreateWorkspace, readManifest, writeManifest } from "../src/core/manifest.js";
 import { saveMarkdown } from "../src/core/markdown.js";
-import { importFileToWorkspace } from "../src/core/records.js";
+import { computeBufferHash, importFileToWorkspace } from "../src/core/records.js";
 import { attachPdfImagesToMarkdown, convertDocumentToMarkdownAsJob } from "../src/core/documents.js";
 import { decodeTextBuffer, textMarkdownConverter, textToMarkdown } from "../src/adapters/textMarkdownConverter.js";
 import { docxDocumentXmlToMarkdown, docxMarkdownConverter } from "../src/adapters/docxMarkdownConverter.js";
@@ -568,6 +568,106 @@ test("PDF retry refuses to replace an existing extraction with empty Markdown", 
   const afterManifest = await readManifest(workspace);
   const afterDocument = afterManifest.documents.find((candidate) => candidate.id === record.id);
   assert.equal(afterDocument.outputMarkdownPath, beforeDocument.outputMarkdownPath);
+});
+test("repairs a legacy empty PDF extraction cache instead of reusing it", async () => {
+  const workspace = await tempDir("pdf-legacy-empty-cache-");
+  await openOrCreateWorkspace(workspace);
+  const pdfPath = path.join(workspace, "legacy-empty.pdf");
+  await writeFile(pdfPath, markdownToPdfBuffer("# Cache recovery\n\nReadable source text must be extracted again."));
+  const record = await importFileToWorkspace(workspace, pdfPath);
+  const firstJob = await convertDocumentToMarkdownAsJob(workspace, record.id, pdfMarkdownConverter);
+  assert.equal(firstJob.status, "succeeded");
+
+  const legacyManifest = await readManifest(workspace);
+  const legacyDocument = legacyManifest.documents.find((candidate) => candidate.id === record.id);
+  const legacyNotice = "# PDF extraction needs another path\n\nPrevious v0.1.3 retry notice.\n";
+  await writeFile(legacyDocument.outputMarkdownPath, "", "utf8");
+  await writeFile(legacyDocument.readableMarkdownPath, legacyNotice, "utf8");
+  legacyDocument.status = "ready";
+  legacyDocument.extractionConverterName = pdfMarkdownConverter.name;
+  // Match the current converter deliberately so the content/quality guards,
+  // rather than only a version mismatch, must reject this legacy cache.
+  legacyDocument.extractionConverterVersion = pdfMarkdownConverter.cacheVersion;
+  legacyDocument.lastExtractedHash = computeBufferHash(Buffer.from("", "utf8"));
+  legacyDocument.lastReadableExtractedHash = computeBufferHash(Buffer.from(legacyNotice, "utf8"));
+  legacyDocument.extractionQuality = { textLayerDetected: false, lowReadableText: false };
+  legacyDocument.quality = { hasTextLayer: true, hasOcrMissing: false };
+  legacyDocument.warnings = ["No readable text layer detected. OCR required."];
+  await writeManifest(workspace, legacyManifest);
+
+  const repairedJob = await convertDocumentToMarkdownAsJob(workspace, record.id, pdfMarkdownConverter);
+  assert.equal(repairedJob.status, "succeeded");
+  assert.notEqual(repairedJob.output.cached, true);
+  const repairedManifest = await readManifest(workspace);
+  const repairedDocument = repairedManifest.documents.find((candidate) => candidate.id === record.id);
+  assert.match(await readFile(repairedDocument.outputMarkdownPath, "utf8"), /Readable source text must be extracted again/);
+  assert.equal(repairedDocument.extractionQuality.textLayerDetected, true);
+});
+test("failed explicit PDF retry preserves an existing high-fidelity extraction", async () => {
+  const workspace = await tempDir("pdf-preserve-high-fidelity-");
+  await openOrCreateWorkspace(workspace);
+  const pdfPath = path.join(workspace, "preserved.pdf");
+  await writeFile(pdfPath, markdownToPdfBuffer("# Source\n\nReadable built-in source text."));
+  const record = await importFileToWorkspace(workspace, pdfPath);
+  const firstJob = await convertDocumentToMarkdownAsJob(workspace, record.id, pdfMarkdownConverter);
+  assert.equal(firstJob.status, "succeeded");
+
+  const beforeManifest = await readManifest(workspace);
+  const beforeDocument = beforeManifest.documents.find((candidate) => candidate.id === record.id);
+  const highFidelityMarkdown = [
+    "# High-fidelity extraction",
+    "",
+    "<!-- pdf-page: 1 -->",
+    "",
+    "$$x^2 + y^2 = z^2$$",
+    "",
+    "| Column A | Column B |",
+    "|---|---|",
+    "| preserved | structure |"
+  ].join("\n") + "\n";
+  await writeFile(beforeDocument.outputMarkdownPath, highFidelityMarkdown, "utf8");
+  await writeFile(beforeDocument.readableMarkdownPath, highFidelityMarkdown, "utf8");
+  beforeDocument.lastExtractedHash = computeBufferHash(Buffer.from(highFidelityMarkdown, "utf8"));
+  beforeDocument.lastReadableExtractedHash = beforeDocument.lastExtractedHash;
+  beforeDocument.extractorName = "pdfplumber";
+  beforeDocument.extractionQuality = {
+    ...(beforeDocument.extractionQuality || {}),
+    textLayerDetected: true,
+    lowReadableText: false,
+    confidence: "high"
+  };
+  beforeDocument.quality = {
+    ...(beforeDocument.quality || {}),
+    hasTextLayer: true,
+    hasOcrMissing: false,
+    confidence: "high"
+  };
+  await writeManifest(workspace, beforeManifest);
+
+  const originalPath = process.env.PATH;
+  let retryJob;
+  try {
+    // Keep Node running but make pdftotext undiscoverable for this retry.
+    process.env.PATH = workspace;
+    retryJob = await convertDocumentToMarkdownAsJob(workspace, record.id, pdfMarkdownConverter, {
+      force: true,
+      preferredExtractor: "pdftotext"
+    });
+  } finally {
+    process.env.PATH = originalPath;
+  }
+
+  assert.equal(retryJob.status, "failed");
+  assert.equal(retryJob.error.code, "document_extraction_fallback_preserved");
+  const afterManifest = await readManifest(workspace);
+  const afterDocument = afterManifest.documents.find((candidate) => candidate.id === record.id);
+  assert.equal(afterDocument.outputMarkdownPath, beforeDocument.outputMarkdownPath);
+  assert.equal(afterDocument.readableMarkdownPath, beforeDocument.readableMarkdownPath);
+  assert.equal(afterDocument.lastExtractedHash, beforeDocument.lastExtractedHash);
+  assert.equal(afterDocument.lastReadableExtractedHash, beforeDocument.lastReadableExtractedHash);
+  assert.equal(afterDocument.extractorName, "pdfplumber");
+  assert.equal(await readFile(afterDocument.outputMarkdownPath, "utf8"), highFidelityMarkdown);
+  assert.equal(await readFile(afterDocument.readableMarkdownPath, "utf8"), highFidelityMarkdown);
 });
 test("non-PDF retry accepts valid heading-only Markdown", async () => {
   const workspace = await tempDir("heading-only-retry-");

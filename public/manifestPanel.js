@@ -8,6 +8,7 @@ state,
 pill,
 escapeHtml,
 run,
+assertSuccessfulJob,
 showAlert,
 exchangePackagePanel,
 aiContextPanel,
@@ -205,8 +206,10 @@ submitBtn.className = "primary";
 submitBtn.textContent = t("Retry");
 submitBtn.addEventListener("click", () => run(async () => {
 const preferredExtractor = select.value;
+const previousNoteContent = $("noteContent").value;
+const extractionPlaceholder = t("Extracting document to Markdown. Large PDFs can take a while; keep this window open.");
 overlay.remove();
-$("noteContent").value = t("Extracting document to Markdown. Large PDFs can take a while; keep this window open.");
+$("noteContent").value = extractionPlaceholder;
 const progressPanel = $("extractionProgress");
 const progressLabel = $("extractionProgressText");
 if (progressPanel) {
@@ -217,10 +220,10 @@ if (progressLabel) {
 progressLabel.textContent = t("Extracting document to Markdown...");
 }
 try {
-const result = await api("/api/document/retry-extraction", {
+const result = assertSuccessfulJob(await api("/api/document/retry-extraction", {
 documentId: record.id,
 preferredExtractor
-});
+}), t("Extraction failed."));
 const manifest = await refreshManifest();
 refreshTimeline();
 refreshVersions();
@@ -248,7 +251,10 @@ showEditorWarningsForRecord(doc);
 await aiContextPanel.updateAiWillSeePanel();
 }
 } catch (err) {
-showAlert("error", t("Extraction failed: ") + err.message);
+if (state.selectedRecord?.id === record.id && $("noteContent").value === extractionPlaceholder) {
+$("noteContent").value = previousNoteContent;
+}
+throw err;
 } finally {
 if (progressPanel) {
 progressPanel.classList.add("hidden");
@@ -655,7 +661,8 @@ showDiagnosticsModal(diagnostics);
 showAlert("error", t("Failed to read diagnostics: ") + err.message);
 }
 });
-addAction("Retry PDF extraction", () => {
+addAction("Retry PDF extraction", async () => {
+await selectRecordForWorkflow(record, "document");
 showRetryModal(record);
 });
 if (record.extractionQuality?.visualContentStatus === "mapped") {

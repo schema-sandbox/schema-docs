@@ -234,6 +234,16 @@ test("selecting a document history record refreshes the active record and segmen
   assert.match(workflow, /window\.renderMarkdownReadView\?\.\(\);/);
   assert.match(workflow, /window\.setMarkdownViewMode\?\.\("edit"\);/);
 });
+test("PDF retries surface failed jobs and restore only the unchanged active editor", async () => {
+  const manifestPanel = await readFile(path.join(projectRoot, "public", "manifestPanel.js"), "utf8");
+  const app = await readFile(path.join(projectRoot, "public", "app.js"), "utf8");
+  assert.match(manifestPanel, /addAction\("Retry PDF extraction", async \(\) => \{\s*await selectRecordForWorkflow\(record, "document"\);/);
+  assert.match(manifestPanel, /const result = assertSuccessfulJob\(await api\("\/api\/document\/retry-extraction"/);
+  assert.match(manifestPanel, /state\.selectedRecord\?\.id === record\.id && \$\("noteContent"\)\.value === extractionPlaceholder/);
+  assert.match(manifestPanel, /catch \(err\) \{[\s\S]*?throw err;\s*\} finally/);
+  assert.match(app, /function assertSuccessfulJob\(job, fallbackMessage = "Operation failed\."\)/);
+  assert.match(app, /assertSuccessfulJob\(\s*await api\("\/api\/document\/retry-extraction", \{ documentId: record\.id, preferredExtractor: "marker" \}\)/);
+});
 test("Markdown inline rendering keeps more than one hundred formulas and code spans in order", () => {
   const renderer = createRenderer();
   const formulas = Array.from({ length: 120 }, (_, index) => `x_{${index}}`);
