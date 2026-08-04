@@ -528,6 +528,7 @@ test("refuses to read a symlink that points outside workspace", async (t) => {
   const outsideFile = path.join(outside, "outside.md");
   const linkPath = path.join(workspace, "notes", "linked.md");
   await writeFile(outsideFile, "outside", "utf8");
+  await mkdir(path.dirname(linkPath), { recursive: true });
   await symlink(outsideFile, linkPath);
   await assert.rejects(() => assertInsideRoot(linkPath, workspace), {
     code: "path_outside_workspace"
