@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import vm from "node:vm";
 import { createMarkdownWorkbenchPanel } from "../public/markdownWorkbenchPanel.js";
 const projectRoot = path.resolve(import.meta.dirname, "..");
 function escapeHtml(value) {
@@ -337,9 +338,56 @@ test("segment navigation clears a stale banner outside a segmented document", as
   assert.match(source, /if \(!segmentsObj \|\| !segmentsObj\.segmented \|\| !segmentsObj\.segments\?\.length\) \{[\s\S]*?banner\.replaceChildren\(\);/);
 });
 
-test("external Markdown open and save use native dialog authorization in desktop mode", async () => {
+test("external Markdown open and save use the Tauri v2 internal bridge without HTTP fallback", async () => {
   const source = await readFile(path.join(projectRoot, "public", "app.js"), "utf8");
-  assert.match(source, /tauriInvoke\("read_authorized_markdown_file", \{ sourcePath \}\)/);
-  assert.match(source, /tauriInvoke\("save_authorized_markdown_file", \{ sourcePath, content \}\)/);
+  const tauriInvokeSource = source.slice(
+    source.indexOf("function tauriInvoke("),
+    source.indexOf("async function bindDesktopAiSummonEvent(")
+  );
+  const externalAccessSource = source.slice(
+    source.indexOf("async function readExternalMarkdownFile("),
+    source.indexOf("function currentMarkdownContent(")
+  );
+  assert.ok(tauriInvokeSource.startsWith("function tauriInvoke("));
+  assert.ok(externalAccessSource.startsWith("async function readExternalMarkdownFile("));
+
+  const nativeCalls = [];
+  let httpCalls = 0;
+  const context = {
+    window: {
+      __TAURI_INTERNALS__: {
+        invoke: async (command, args) => {
+          nativeCalls.push({ command, args });
+          return command === "read_authorized_markdown_file" ? "# Direct external Markdown" : { saved: true };
+        }
+      }
+    },
+    api: async () => {
+      httpCalls += 1;
+      throw new Error("external Markdown must not use the public HTTP API");
+    }
+  };
+  vm.runInNewContext([
+    tauriInvokeSource,
+    externalAccessSource,
+    "globalThis.externalMarkdownAccess = { readExternalMarkdownFile, saveExternalMarkdownFile };"
+  ].join("\n"), context);
+
+  const sourcePath = "C:\\Users\\tester\\notes\\direct.md";
+  const content = await context.externalMarkdownAccess.readExternalMarkdownFile(sourcePath);
+  const saved = await context.externalMarkdownAccess.saveExternalMarkdownFile(sourcePath, "updated");
+  assert.equal(content, "# Direct external Markdown");
+  assert.equal(saved.saved, true);
+  assert.equal(httpCalls, 0);
+  assert.equal(nativeCalls.length, 2);
+  assert.equal(nativeCalls[0].command, "read_authorized_markdown_file");
+  assert.equal(nativeCalls[0].args.sourcePath, sourcePath);
+  assert.equal(nativeCalls[1].command, "save_authorized_markdown_file");
+  assert.equal(nativeCalls[1].args.sourcePath, sourcePath);
+  assert.equal(nativeCalls[1].args.content, "updated");
+  assert.equal("__TAURI__" in context.window, false);
+
   assert.match(source, /const content = await readExternalMarkdownFile\(selected\);/);
+  assert.match(source, /isExternalMarkdownPath\(relativePath\)[\s\S]*?await readExternalMarkdownFile\(relativePath\)/);
+  assert.doesNotMatch(externalAccessSource, /\/api\/markdown\/(?:read|save)-external/);
 });

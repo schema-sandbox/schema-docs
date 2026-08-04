@@ -989,16 +989,10 @@ async function saveCurrentNote() {
  return result;
 }
 async function readExternalMarkdownFile(sourcePath) {
- if (window.__TAURI__) {
-  return tauriInvoke("read_authorized_markdown_file", { sourcePath });
- }
- return api("/api/markdown/read-external", { sourcePath });
+ return tauriInvoke("read_authorized_markdown_file", { sourcePath });
 }
 async function saveExternalMarkdownFile(sourcePath, content) {
- if (window.__TAURI__) {
-  return tauriInvoke("save_authorized_markdown_file", { sourcePath, content });
- }
- return api("/api/markdown/save-external", { sourcePath, content });
+ return tauriInvoke("save_authorized_markdown_file", { sourcePath, content });
 }
 function currentMarkdownContent() {
  if (window.markdownEditor && typeof window.markdownEditor.getValue === "function") {
@@ -1733,7 +1727,9 @@ async function loadFullCurrentMarkdownFile() {
  } else {
   showAlert("info", `Loading full Markdown file: ${relativePath}`);
  }
- const content = await api("/api/markdown/read", { relativePath });
+ const content = isExternalMarkdownPath(relativePath)
+  ? await readExternalMarkdownFile(relativePath)
+  : await api("/api/markdown/read", { relativePath });
  $("noteContent").value = content;
  markMarkdownClean(content);
  renderMarkdownReadView();
