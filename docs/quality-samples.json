@@ -1,0 +1,107 @@
+{
+  "schema": "schema-docs.quality-sample-catalog",
+  "version": 1,
+  "updatedAt": "2026-09-20T00:00:00.000Z",
+  "samples": [
+    {
+      "id": "fixture-normal-word",
+      "category": "office_structure",
+      "sourceType": "md",
+      "path": "test-fixtures/manual-golden-samples/01-normal-word-report/expected.md",
+      "expectedFeatures": ["headings", "lists", "table"],
+      "protected": true,
+      "fixtureOnly": true,
+      "notes": "Fixture-only expected output; replace with a legally usable source document for production baselines."
+    },
+    {
+      "id": "fixture-chinese-contract",
+      "category": "office_structure",
+      "sourceType": "md",
+      "path": "test-fixtures/manual-golden-samples/02-chinese-word-contract/expected.md",
+      "expectedFeatures": ["cjk", "numbering", "header_footer"],
+      "protected": true,
+      "fixtureOnly": true,
+      "notes": "Fixture-only expected output."
+    },
+    {
+      "id": "fixture-text-pdf",
+      "category": "pdf_text",
+      "sourceType": "md",
+      "path": "test-fixtures/manual-golden-samples/03-text-pdf-report/expected.md",
+      "expectedFeatures": ["text_layer", "headings"],
+      "protected": true,
+      "fixtureOnly": true,
+      "notes": "Fixture-only expected output."
+    },
+    {
+      "id": "fixture-scanned-pdf",
+      "category": "pdf_scanned",
+      "sourceType": "md",
+      "path": "test-fixtures/manual-golden-samples/04-scanned-pdf/expected.md",
+      "expectedFeatures": ["ocr", "visual_fallback"],
+      "protected": true,
+      "fixtureOnly": true,
+      "notes": "Fixture-only expected output; does not prove OCR quality."
+    },
+    {
+      "id": "fixture-large-pdf",
+      "category": "large_document",
+      "sourceType": "md",
+      "path": "test-fixtures/manual-golden-samples/05-huge-pdf-document/expected.md",
+      "expectedFeatures": ["segmentation", "long_document"],
+      "protected": true,
+      "fixtureOnly": true,
+      "notes": "Fixture-only expected output; does not replace a real long PDF."
+    },
+    {
+      "id": "fixture-simple-spreadsheet",
+      "category": "spreadsheet",
+      "sourceType": "md",
+      "path": "test-fixtures/manual-golden-samples/06-simple-excel-sheet/expected.md",
+      "expectedFeatures": ["table", "columns"],
+      "protected": false,
+      "fixtureOnly": true,
+      "notes": "Fixture-only expected output."
+    },
+    {
+      "id": "fixture-multi-sheet",
+      "category": "spreadsheet",
+      "sourceType": "md",
+      "path": "test-fixtures/manual-golden-samples/07-multi-sheet-excel/expected.md",
+      "expectedFeatures": ["multiple_sheets", "table"],
+      "protected": false,
+      "fixtureOnly": true,
+      "notes": "Fixture-only expected output."
+    },
+    {
+      "id": "fixture-long-markdown",
+      "category": "long_document",
+      "sourceType": "md",
+      "path": "test-fixtures/manual-golden-samples/08-long-markdown-article/expected.md",
+      "expectedFeatures": ["segmentation", "headings"],
+      "protected": true,
+      "fixtureOnly": true,
+      "notes": "Fixture-only expected output."
+    },
+    {
+      "id": "fixture-mixed-cjk",
+      "category": "language_mixture",
+      "sourceType": "md",
+      "path": "test-fixtures/manual-golden-samples/09-mixed-cjk-english/expected.md",
+      "expectedFeatures": ["cjk", "english", "mixed_layout"],
+      "protected": true,
+      "fixtureOnly": true,
+      "notes": "Fixture-only expected output."
+    },
+    {
+      "id": "fixture-sensitive-pii",
+      "category": "sanitization",
+      "sourceType": "md",
+      "path": "test-fixtures/manual-golden-samples/10-sensitive-pii-document/expected.md",
+      "expectedFeatures": ["pii", "secret_redaction"],
+      "protected": true,
+      "fixtureOnly": true,
+      "notes": "Fixture-only expected output; use only for local sanitization regression."
+    }
+  ]
+}

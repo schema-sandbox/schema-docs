@@ -30,6 +30,8 @@ npm run release:windows:prepare
 
 `release:windows:prepare` requires a completed Tauri build. It checks matching versions in `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`; verifies runtime and docs; then atomically refreshes the MSI, NSIS, portable ZIP, and `release/windows/SHA256SUMS.txt`. Failure leaves prior assets unchanged.
 
+The preparation step only publishes files named for the current version. Installer files from earlier versions, such as the v0.1.3 MSI, NSIS setup, and portable ZIP, remain in `release/windows/` and must be retained for rollback and tester comparison.
+
 Before tester handoff, run:
 
 ```bash
