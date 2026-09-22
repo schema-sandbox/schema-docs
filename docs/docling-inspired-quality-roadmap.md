@@ -648,6 +648,12 @@ Q05 改动已重新打包为 NSIS/MSI 内部候选。暂存源码、私有转换
 
 **新增：真实合页验收测试。** 原合页用例用手工构造的 region 对象，只能证明区域逻辑、不能证明真实 PDF 几何能走通全链路。新增 `test/pdf-page-flow.test.js` 用例：用 pypdfium2 生成同时含正文、公式与带框表格的一页，断言正文按序各出现一次且不被任何公式区域吞并、恰好一个公式区域位于恰好一个带框表格上方、表格解析为 3×2 且单元文本正确、IR 中表头/分隔行/表体行共用同一 `tableId`。
 
-**新发现（F02 残留，已复现、未修改判定逻辑）。** 上述用例在生成页上复现：Symbol 编码字体（无 ToUnicode 映射）的一行 `x=y+z` 被提取为 `ÿ=ÿ+ÿ`，仍标记 `editableMathCandidate: true`、`needsVisualFallback: false`。页面渲染的是希腊字母，文本层不可恢复，本应走视觉回退。现有守卫只覆盖 PUA / `(cid:n)` / `\ufffd`，不覆盖解码成合法 Latin-1 的形状；尚缺“字体无 Unicode 映射”这一证据源。只读复现件：`.ai-doc-exchange/audits/2026-09-23-upgrade-result-audit/combined-fixture.py`。
+**新发现（F02 残留，已复现、未修改判定逻辑）。** 上述用例在生成页上复现：Symbol 编码字体（无 ToUnicode 映射）的一行 `x=y+z` 被提取为 `ÿ=ÿ+ÿ`，仍标记 `editableMathCandidate: true`、`needsVisualFallback: false`。页面渲染的是希腊字母，文本层不可恢复，本应走视觉回退。现有守卫只覆盖 PUA / `(cid:n)` / `\ufffd`，不覆盖解码成合法 Latin-1 的形状；尚缺“字体无 Unicode 映射”这一证据源。
+
+规模已在上一轮真实材料产物（r5，改动前构建）上核对：8 份成功材料共 50608 个公式区域，其中 `needsVisualFallback: false` 却含 Latin-1 补充区字母的有 80 个，集中在 Math4Kids（71）与 Feynman 讲义（9）。出现的码位以 `Ý`(169)、`Ñ`(115)、`ñ`(64)、`ù`(22)、`Ð`(13)、`ð`(9) 为主，另有少量真实重音 `ö`(6)、`ü`(1)、`é`(1)、`è`(1)。按上下文分，80 个中 31 个是数学形状（如 `xÑx`、`δxÑ0δxÑ0`），49 个是重音落在真实单词里（`Mössbauer`、`Müller`、`Ñaña, Peru`），后者是“正文被误判成公式”的另一类缺陷。
+
+因此不能按 Latin-1 区间整体判为损坏：那会把 `Mössbauer` 一类合法文本一起推进视觉回退。可行方向是按码位区分（`Ñ Ý ñ ù ð Ð` 是 TeX 字体码位落到 Latin-1 的典型产物，`ö ü é è` 更像真实重音），但需要逐字体核对码位来源；本轮只记录规模与判据难点，不采用区间启发式。
+
+只读复现件：`.ai-doc-exchange/audits/2026-09-23-upgrade-result-audit/combined-fixture.py`。
 
 **门禁与回归。** 全量 568 项：567 通过、0 失败、1 跳过（Windows 平台权限）。体积、语言边界、发布自动检查、私有转换运行时校验四项门禁通过。
