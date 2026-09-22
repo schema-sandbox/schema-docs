@@ -19,6 +19,7 @@ import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 import { KATEX_WOFF2_FONT_FILES } from "../src/core/katexRuntimeAssets.js";
+import { verifyConversionRuntime } from "./verify-conversion-runtime.js";
 
 const execFileAsync = promisify(execFile);
 const projectRoot = path.resolve(import.meta.dirname, "..");
@@ -254,6 +255,9 @@ export async function prepareWindowsRelease({
 
   await requireFile(sources.app, "desktop executable");
   await requireDirectory(sources.runtime, "desktop runtime directory");
+  if (await lstat(path.join(runtimeSource, "runtime", "manifest.json")).catch(() => null)) {
+    await verifyConversionRuntime(path.join(runtimeSource, "runtime"), { publicRelease: true });
+  }
   for (const relativePath of REQUIRED_RUNTIME_FILES) {
     await requireFile(path.join(runtimeSource, ...relativePath.split("/")), `runtime file ${relativePath}`);
   }

@@ -17,6 +17,7 @@ Thumbs.db
 
 # Desktop resources generated during release packaging
 /src-tauri/resources/node.exe
+/runtime/
 
 # Local runtime state
 /.local-file-tool/

@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -97,8 +98,24 @@ async function stopProcessTree(pid) {
     return await new Promise((resolve) => {
       const killer = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
       killer.once("exit", (code) => {
-        const stillRunning = isProcessRunning(pid);
-        resolve({ attempted: true, method: "taskkill", ok: code === 0 || !stillRunning, exitCode: code, stillRunning });
+        let stillRunning = isProcessRunning(pid);
+        let fallbackError = "";
+        if (stillRunning && code !== 0) {
+          try {
+            process.kill(pid);
+          } catch (error) {
+            fallbackError = error.message;
+          }
+          stillRunning = isProcessRunning(pid);
+        }
+        resolve({
+          attempted: true,
+          method: "taskkill",
+          ok: code === 0 || !stillRunning,
+          exitCode: code,
+          stillRunning,
+          ...(fallbackError ? { fallbackError } : {})
+        });
       });
       killer.once("error", (error) => {
         try {
@@ -126,6 +143,27 @@ function isProcessRunning(pid) {
   } catch {
     return false;
   }
+}
+
+async function readRuntimePids(sessionRoot) {
+  const pids = [];
+  let entries = [];
+  try {
+    entries = await readdir(sessionRoot, { withFileTypes: true });
+  } catch {
+    return pids;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    try {
+      const session = JSON.parse(await readFile(path.join(sessionRoot, entry.name, "session.json"), "utf8"));
+      const pid = Number(session.pid);
+      if (Number.isInteger(pid) && pid > 0) pids.push(pid);
+    } catch {
+      // The runtime may still be writing its session file.
+    }
+  }
+  return [...new Set(pids)];
 }
 
 async function runWorkflow(runtime, token) {
@@ -267,12 +305,14 @@ if (!existsSync(appPath)) {
   });
 } else {
   const smokeToken = randomBytes(24).toString("hex");
+  const runtimeSessionRoot = await mkdtemp(path.join(os.tmpdir(), "schema-docs-workflow-smoke-"));
   const child = spawn(appPath, [], {
     stdio: "ignore",
     env: {
       ...process.env,
       SCHEMA_DOCS_DESKTOP_PORT: String(startPort),
-      SCHEMA_DOCS_DESKTOP_TOKEN: smokeToken
+      SCHEMA_DOCS_DESKTOP_TOKEN: smokeToken,
+      SCHEMA_DOCS_RUNTIME_SESSION_DIR: runtimeSessionRoot
     }
   });
   const appExit = {
@@ -296,7 +336,15 @@ if (!existsSync(appPath)) {
       workflowError = error.message;
     }
   }
+  const runtimePids = await readRuntimePids(runtimeSessionRoot);
   const cleanup = await stopProcessTree(child.pid);
+  const runtimeCleanup = [];
+  for (const runtimePid of runtimePids) {
+    runtimeCleanup.push({ pid: runtimePid, ...(await stopProcessTree(runtimePid)) });
+  }
+  cleanup.runtimePids = runtimePids;
+  cleanup.runtime = runtimeCleanup;
+  await rm(runtimeSessionRoot, { recursive: true, force: true }).catch(() => {});
   const workflowOk = Boolean(
     workflow?.docxExportOk
     && workflow?.pdfExportOk
@@ -316,7 +364,7 @@ if (!existsSync(appPath)) {
   );
 
   printAndExit({
-    ok: runtime.ok && workflowOk,
+    ok: runtime.ok && workflowOk && cleanup.ok && runtimeCleanup.every((result) => result.ok),
     mode: "launch",
     appPath,
     packagedRuntime,

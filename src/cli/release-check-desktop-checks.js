@@ -1,3 +1,69 @@
+const FORBIDDEN_NATIVE_PICKER_IMPLEMENTATION = /powershell\.exe|OpenFileDialog|FolderBrowserDialog|SaveFileDialog|ShowDialog|\.output\(\)/i;
+
+function asyncTauriCommandBlock(source, commandName) {
+  const normalized = String(source ?? "").replace(/\r\n/g, "\n");
+  const signature = `async fn ${commandName}(`;
+  const signatureIndex = normalized.indexOf(signature);
+  if (signatureIndex === -1) return "";
+  const attributeIndex = normalized.lastIndexOf("#[tauri::command]", signatureIndex);
+  if (attributeIndex === -1) return "";
+  const prefix = normalized.slice(attributeIndex, signatureIndex);
+  if (/\n}\n/.test(prefix)) return "";
+  const remainder = normalized.slice(signatureIndex);
+  const closingMatch = /\n}\n/.exec(remainder);
+  if (!closingMatch) return "";
+  return normalized.slice(attributeIndex, signatureIndex + closingMatch.index + 3);
+}
+
+function isOwnedDialogPicker(block, blockingMethod) {
+  return Boolean(
+    block
+    && block.includes("window: tauri::Window")
+    && block.includes(".dialog()")
+    && block.includes(".file()")
+    && block.includes(".set_parent(&window)")
+    && block.includes(`.${blockingMethod}()`)
+    && !FORBIDDEN_NATIVE_PICKER_IMPLEMENTATION.test(block)
+  );
+}
+
+export function desktopNativePickersPresent(tauriLib) {
+  const source = String(tauriLib ?? "");
+  const specs = [
+    { name: "select_import_file_path", method: "blocking_pick_file" },
+    { name: "select_markdown_file_path", method: "blocking_pick_file" },
+    { name: "select_save_file_path", method: "blocking_save_file" },
+    { name: "select_workspace_path", method: "blocking_pick_folder" },
+    { name: "select_import_directory_path", method: "blocking_pick_folder" }
+  ];
+  const blocks = new Map(
+    specs.map(({ name }) => [name, asyncTauriCommandBlock(source, name)])
+  );
+  const handlerStart = source.indexOf(".invoke_handler(tauri::generate_handler![");
+  const handlerEnd = handlerStart === -1 ? -1 : source.indexOf("])", handlerStart);
+  const handlerBlock = handlerStart === -1 || handlerEnd === -1
+    ? ""
+    : source.slice(handlerStart, handlerEnd);
+  const importBlock = blocks.get("select_import_file_path") ?? "";
+  const markdownBlock = blocks.get("select_markdown_file_path") ?? "";
+  const saveBlock = blocks.get("select_save_file_path") ?? "";
+
+  return Boolean(
+    source.includes("use tauri_plugin_dialog::DialogExt;")
+    && source.includes(".plugin(tauri_plugin_dialog::init())")
+    && specs.every(({ name, method }) => isOwnedDialogPicker(blocks.get(name), method))
+    && specs.every(({ name }) => handlerBlock.includes(`${name},`))
+    && importBlock.includes(".add_filter(")
+    && ["docx", "pptx", "pdf", "txt", "csv", "xlsx", "xls"]
+      .every((extension) => importBlock.includes(`"${extension}"`))
+    && markdownBlock.includes(".add_filter(")
+    && ["md", "markdown"].every((extension) => markdownBlock.includes(`"${extension}"`))
+    && saveBlock.includes("clean_save_extensions(&extensions)")
+    && saveBlock.includes("extension_refs")
+    && saveBlock.includes(".add_filter(")
+  );
+}
+
 export function getDesktopChecks(context) {
   const {
     aiSummonPanel,
@@ -134,17 +200,7 @@ export function getDesktopChecks(context) {
     {
       name: "desktop_native_pickers_present",
       ok: Boolean(
-        tauriLib.includes("select_import_file_path")
-        && tauriLib.includes("select_markdown_file_path")
-        && tauriLib.includes("select_workspace_path")
-        && tauriLib.includes("OpenFileDialog")
-        && tauriLib.includes("FolderBrowserDialog")
-        && tauriLib.includes("*.docx;*.pptx;*.pdf;*.txt;*.csv;*.xlsx;*.xls")
-        && tauriLib.includes("*.md;*.markdown")
-        && tauriLib.includes("tauri::generate_handler!")
-        && tauriLib.includes("select_import_file_path,")
-        && tauriLib.includes("select_markdown_file_path,")
-        && tauriLib.includes("select_workspace_path,")
+        desktopNativePickersPresent(tauriLib)
         && appJs.includes("tauriInvoke")
         && appJs.includes("createDocumentFlowPanel")
         && appJs.includes("handleOpenMarkdownFile")
@@ -162,6 +218,10 @@ export function getDesktopChecks(context) {
         workspaceCommand: "select_workspace_path",
         importFileCommand: "select_import_file_path",
         markdownFileCommand: "select_markdown_file_path",
+        saveFileCommand: "select_save_file_path",
+        importDirectoryCommand: "select_import_directory_path",
+        dialogPlugin: "tauri-plugin-dialog",
+        dialogOwner: "set_parent(&window)",
         uiControls: ["chooseWorkspace", "dropZone", "fileInput"],
         importFormats: ["docx", "pptx", "pdf", "txt", "csv", "xlsx", "xls"],
         openFormats: ["md", "markdown"]

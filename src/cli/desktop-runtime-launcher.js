@@ -10,6 +10,7 @@ const sessionDir = process.env.SCHEMA_DOCS_RUNTIME_SESSION_DIR
 const preferredPort = Number(process.argv[2] ?? process.env.SCHEMA_DOCS_DESKTOP_PORT ?? 4177);
 const host = process.env.SCHEMA_DOCS_DESKTOP_HOST ?? "127.0.0.1";
 const token = process.env.SCHEMA_DOCS_DESKTOP_TOKEN ?? randomBytes(24).toString("hex");
+const sessionNonce = process.env.SCHEMA_DOCS_DESKTOP_SESSION_NONCE ?? "";
 const fetchBlockedPorts = new Set([
   1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95,
   101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161,
@@ -19,7 +20,12 @@ const fetchBlockedPorts = new Set([
 ]);
 
 function emitBootstrapMarker({ apiBaseUrl, bootstrapToken }) {
-  const encoded = Buffer.from(JSON.stringify({ baseUrl: apiBaseUrl, bootstrapToken }), "utf8").toString("base64url");
+  const encoded = Buffer.from(JSON.stringify({
+    baseUrl: apiBaseUrl,
+    bootstrapToken,
+    pid: process.pid,
+    sessionNonce
+  }), "utf8").toString("base64url");
   // Keep stdout machine-readable for existing runtime diagnostics and smoke
   // checks. The desktop bridge reads the one-time bootstrap marker from the
   // separately captured stderr tail.
@@ -54,6 +60,7 @@ const session = {
   port,
   host,
   pid: process.pid,
+  sessionNonce,
   tokenSource: process.env.SCHEMA_DOCS_DESKTOP_TOKEN ? "env" : "generated",
   transport: "secured-loopback-proxy+private-pipe"
 };

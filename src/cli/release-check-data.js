@@ -38,9 +38,9 @@ export const desktopHandoffLabels = [
 ];
 
 export const expectedTestSummary = {
-  badge: "tests-387%20passing%20%2F%201%20skipped",
-  readme: "388 automated",
-  docs: "388 tests, 387 pass, 1 skipped"
+  badge: "tests-548%20passing%20%2F%201%20skipped",
+  readme: "549 automated",
+  docs: "549 tests, 548 pass, 1 skipped"
 };
 
 export const requiredScripts = [

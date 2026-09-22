@@ -92,7 +92,7 @@ function buildCommands({ mode, preflightDir }) {
     commands.push("npm run desktop-preflight-check -- <dir>");
   }
 
-  commands.push("npm run desktop-verification-fill -- --record <partial-record.json> --diagnostics-pass --first-workflow-pass --workspace-picker-pass --file-picker-pass --result-pass --tester <name> --windows-version <windows-version> --node-version <node-version> --webview2-present yes --out <filled-record.json>");
+  commands.push("npm run desktop-verification-fill -- --record <partial-record.json> --diagnostics-pass --first-workflow-pass --workspace-picker-pass --file-picker-pass --spreadsheet-preview-evidence <spreadsheet-preview.json> --workspace-images-evidence <workspace-images.json> --save-picker-evidence <save-picker.json> --segmented-html-export-evidence <segmented-html-export.json> --result-pass --tester <name> --windows-version <windows-version> --node-version <node-version> --webview2-present yes --out <filled-record.json>");
   commands.push("npm run desktop-verification-check -- --strict <filled-record.json>");
   commands.push("npm run desktop-fixture-close -- --record <filled-record.json> --write");
   return commands;

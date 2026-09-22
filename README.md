@@ -6,7 +6,7 @@
 >
 > Import Word, PDF, Excel, CSV, or Markdown; mask PII locally; trim the context; block unsafe sends; and export a verifiable SDXP exchange package.
 
-[![Tests](https://img.shields.io/badge/tests-387%20passing%20%2F%201%20skipped-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-548%20passing%20%2F%201%20skipped-brightgreen)](#testing)
 [![License](https://img.shields.io/badge/license-MIT-blue)](#license)
 [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)](#installation)
 [![Version](https://img.shields.io/badge/version-v0.1.4--public--preview-orange)](#changelog)
@@ -35,7 +35,7 @@ That one command creates a temporary workspace, imports a document with PII and 
 Word / PDF / Excel / CSV
         |
         v
-[ Local Extraction ]   -> zero dependencies, runs offline
+[ Local Extraction ]   -> local engine and bundled conversion components, runs offline
         |
         v
 [ Privacy Masking ]    -> detect PII, API keys, credentials
@@ -69,7 +69,7 @@ AI Model  --or--  Exchange Package  --or--  Block (local evidence log)
 ### Office / PDF / Spreadsheet Intake
 - Adaptive PDF extraction with text-layer recovery, optional local OCR, traceable formulas, recovered tables, and source-linked visual assets
 - DOCX to Markdown (headings, lists, tables)
-- XLSX multi-sheet parsing with field inference
+- XLSX multi-sheet parsing with field inference, visible real-row preview, and worksheet switching
 - Mixed-script document support tested
 
 ### Local Privacy Masking Gateway
@@ -90,7 +90,7 @@ AI Model  --or--  Exchange Package  --or--  Block (local evidence log)
 - Receiver trust report: `trusted` / `trusted_with_warnings` / `blocked` verdict
 
 ### Desktop App (Windows)
-- **Windows public-preview package is available**: NSIS setup (`.exe`) and MSI package (`.msi`) are provided
+- **Windows package status**: the confirmed v0.1.3 installers remain available; the rebuilt v0.1.4 NSIS/MSI/portable artifacts remain candidates until the current F-012 visible desktop verification is complete
 - Tauri shell launches the local Node.js runtime and web UI automatically
 - Diagnostics panel shows runtime health, Node version, and API status
 - AI summon shortcut (`Ctrl+Alt+A`) opens the Send Gate within the Schema Docs window
@@ -103,7 +103,7 @@ AI Model  --or--  Exchange Package  --or--  Block (local evidence log)
 
 ### Desktop App (Windows)
 
-Download the latest release installer:
+The following filenames identify the rebuilt v0.1.4 candidate artifacts. They are not the published latest release until F-012 visible desktop verification is complete; use the confirmed v0.1.3 release until that gate closes.
 
 - **NSIS setup**: `schema-docs_0.1.4_x64-setup.exe`
 - **MSI package**: `schema-docs_0.1.4_x64_en-US.msi`
@@ -274,16 +274,18 @@ src/
 public/                 - Web UI, vanilla JS ES modules, no bundler
 src-tauri/              - Tauri desktop shell, Rust and Cargo
 docs/                   - Protocol specs, known limits, release docs
-test/                   - 388 automated tests
+test/                   - 549 automated tests
 ```
 **Zero installed npm runtime dependencies**: the core uses Node.js built-ins plus bundled offline assets. Styled PDF export invokes a locally installed Edge or Chromium renderer.
+
+The current Windows conversion candidate also includes a private Python/PDFium/pdfplumber runtime, Tesseract, and Chinese/English language data. Its approximately 96 MiB of components are measured separately from application code. Build inputs are pinned in `config/conversion-runtime-inputs.json`; assemble them with `scripts/assemble-conversion-runtime.py` and verify them with `node scripts/verify-conversion-runtime.js`. Native redistribution notices and clean-machine installer acceptance remain release requirements.
 
 ---
 
 ## Testing
 
 ```bash
-npm test                         # 388 automated tests at the source release audit: 387 pass, 1 manual external-sync scenario skipped
+npm test                         # 549 automated tests: 548 pass, 1 manual external-sync scenario skipped
 npm run release:public-preview   # One-command public-preview gate and handoff refresh
 npm run rc-check                 # Full public-preview RC preflight gate
 npm run public-preview-package -- --json  # Public-preview installer handoff report
@@ -343,7 +345,7 @@ See [`docs/sdxp-spec-v1.0.md`](docs/sdxp-spec-v1.0.md) for the full specificatio
 Documented transparently in [`docs/known-limits.md`](docs/known-limits.md):
 
 - Complex multi-column PDF layouts may produce reordered text blocks
-- Scanned (image-only) PDFs require the optional local Tesseract + Poppler OCR path or an upstream searchable PDF; without those tools, Send Gate remains blocked
+- The Windows conversion candidate uses internal PDFium/Tesseract OCR for image-only pages. Source-only installations need the assembled runtime or a compatible external OCR adapter. Unrecognized pages and source-image formula fallbacks require review before AI handoff.
 - XLSX formulas are not evaluated; only raw cell values are extracted
 - Complex DOCX styles (SmartArt, embedded objects) are simplified
 
@@ -357,13 +359,13 @@ See [`docs/developer-quickstart.md`](docs/developer-quickstart.md) for a 10-minu
 
 ## Changelog
 
-See [`docs/v0.1.0-release-notes.md`](docs/v0.1.0-release-notes.md) for the v0.1.0 release summary.
+See [`docs/v0.1.4-release-notes.md`](docs/v0.1.4-release-notes.md) for the current candidate summary and remaining manual gate. Historical notes remain available in [`docs/v0.1.0-release-notes.md`](docs/v0.1.0-release-notes.md).
 
 ---
 
 ## Launch Assets
 
-See [`docs/v0.1.4-release-notes.md`](docs/v0.1.4-release-notes.md) for the current release summary and known limits.
+The v0.1.4 upload set must not be published until its exact artifact hashes pass F-012 visible desktop verification.
 
 ---
 

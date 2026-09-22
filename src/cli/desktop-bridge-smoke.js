@@ -1,8 +1,9 @@
 import { existsSync } from "node:fs";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { setTimeout as delay } from "node:timers/promises";
 import { KATEX_WOFF2_FONT_FILES } from "../core/katexRuntimeAssets.js";
 
 const root = path.resolve(import.meta.dirname, "../..");
@@ -17,6 +18,7 @@ const runtimeRoot = path.resolve(argValue(
   path.join(root, "src-tauri", "target", "release", "runtime")
 ));
 const port = Number(argValue("--port", process.env.SCHEMA_DOCS_DESKTOP_PORT ?? 18160));
+const DESKTOP_RUNTIME_READY_TIMEOUT_MS = 20_000;
 const launcher = path.join(runtimeRoot, "src", "cli", "desktop-runtime-launcher.js");
 const packageJson = path.join(runtimeRoot, "package.json");
 const nodeName = process.platform === "win32" ? "node.exe" : "node";
@@ -59,7 +61,7 @@ function waitForLauncher(child) {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       reject(new Error(`desktop runtime bridge did not become ready. stderr: ${stderr.trim()}`));
-    }, 7000);
+    }, DESKTOP_RUNTIME_READY_TIMEOUT_MS);
 
     child.stdout.on("data", (chunk) => {
       stdout += chunk.toString();
@@ -107,10 +109,12 @@ if (missingFiles.length > 0) {
     },
     stdio: ["ignore", "pipe", "pipe"]
   });
+  const childClosed = new Promise((resolve) => child.once("close", () => resolve(true)));
 
   let runtime;
   let health;
   let failure = null;
+  let cleanup;
   try {
     runtime = await waitForLauncher(child);
     health = await readHealth(runtime.baseUrl);
@@ -124,11 +128,53 @@ if (missingFiles.length > 0) {
       error: error.message
     };
   } finally {
-    child.kill();
+    if (child.exitCode === null && child.signalCode === null) child.kill();
+    let stopped = await Promise.race([
+      childClosed,
+      delay(5_000, false, { ref: false })
+    ]);
+    const forced = !stopped;
+    if (forced) {
+      child.kill("SIGKILL");
+      stopped = await Promise.race([
+        childClosed,
+        delay(5_000, false, { ref: false })
+      ]);
+    }
+    let sessionRemoved = false;
+    let cleanupError = "";
+    if (stopped) {
+      try {
+        await rm(sessionDir, { recursive: true, force: true });
+        sessionRemoved = true;
+      } catch (error) {
+        cleanupError = error.message;
+      }
+    } else {
+      cleanupError = "desktop runtime bridge remained active after forced termination";
+    }
+    if (forced && !cleanupError) cleanupError = "desktop runtime bridge required forced termination";
+    cleanup = {
+      ok: stopped && sessionRemoved && !forced,
+      forced,
+      stillRunning: !stopped,
+      sessionRemoved,
+      error: cleanupError
+    };
   }
 
   if (failure) {
-    printAndExit(failure);
+    printAndExit({ ...failure, cleanup });
+  } else if (!cleanup.ok) {
+    printAndExit({
+      ok: false,
+      runtimeRoot,
+      launcher,
+      nodePath,
+      isBundled,
+      cleanup,
+      error: cleanup.error
+    });
   } else {
     printAndExit({
       ok: Boolean(
@@ -142,7 +188,8 @@ if (missingFiles.length > 0) {
       nodePath,
       isBundled,
       runtime,
-      health
+      health,
+      cleanup
     });
   }
 }

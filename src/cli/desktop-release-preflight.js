@@ -172,7 +172,11 @@ function buildManualVerificationSteps() {
     "Click the visible first-workflow control and record firstWorkflow.status=pass and readBackValid=true only after the visible workflow completes.",
     "Use the native workspace folder picker and record pathFilled=true and workspaceOpened=true only after the picked workspace opens.",
     "Use the native supported-file picker and record pathFilled=true and importSucceeded=true only after the selected file imports.",
-    "Generate the filled record with npm run desktop-verification-fill -- --record <partial-record.json> --diagnostics-pass --first-workflow-pass --workspace-picker-pass --file-picker-pass --result-pass --tester <name> --windows-version <windows-version> --node-version <node-version> --webview2-present yes --out <filled-record.json>.",
+    "Import a real multi-sheet XLSX, confirm real row values are visible, switch between at least two sheets, and save a spreadsheet-preview evidence JSON with status=pass, realRowsVisible=true, multipleSheetsVisible=true, and sheetSwitchWorked=true.",
+    "Import PPTX and PDF fixtures, inspect at least one rendered workspace image from each format, confirm each image has naturalWidth > 0 with no broken-image state, and save a workspace-images evidence JSON with the four corresponding booleans true.",
+    "Open the native save picker, confirm it is visible and owned by the Schema Docs main window, cancel it, confirm the app regains focus and remains responsive, and save a save-picker evidence JSON with the three corresponding booleans true.",
+    "Export a segmented PDF to HTML, confirm content from every segment including the last is present, confirm the selected HTML file exists and is non-empty on disk, and save a segmented-html-export evidence JSON with the four corresponding booleans true.",
+    "Generate the filled record with npm run desktop-verification-fill -- --record <partial-record.json> --diagnostics-pass --first-workflow-pass --workspace-picker-pass --file-picker-pass --spreadsheet-preview-evidence <spreadsheet-preview.json> --workspace-images-evidence <workspace-images.json> --save-picker-evidence <save-picker.json> --segmented-html-export-evidence <segmented-html-export.json> --result-pass --tester <name> --windows-version <windows-version> --node-version <node-version> --webview2-present yes --out <filled-record.json>.",
     "Run npm run desktop-verification-check -- --strict <filled-record.json>, then close F-012 only with npm run desktop-fixture-close -- --record <filled-record.json> --write."
   ];
 }
@@ -260,7 +264,7 @@ export function buildRemainingManualGate({ appSmoke, workflowSmoke } = {}) {
     gate.push("Run full npm run desktop:workflow-smoke in a Windows GUI environment or record equivalent workflow evidence.");
   }
   gate.push(
-    "Fill visible Desktop UI diagnostics, first workflow, native workspace picker, and native file picker results.",
+    "Fill visible Desktop UI diagnostics, first workflow, native workspace picker, native file picker, spreadsheet preview, PPTX/PDF workspace image, save-picker cancellation, and segmented PDF HTML export results.",
     "Fill result.tester, result.testedAt, and result.status before strict verification can pass."
   );
   return gate;

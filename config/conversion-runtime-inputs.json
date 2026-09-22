@@ -1,0 +1,106 @@
+{
+  "schema": "schema-docs.runtime-input-lock.v1",
+  "python": "3.12.14",
+  "packages": {
+    "pdfplumber": "0.11.9",
+    "pdfminer.six": "20251230",
+    "pypdfium2": "5.13.0",
+    "Pillow": "12.3.0",
+    "charset-normalizer": "3.5.1",
+    "cryptography": "50.0.1",
+    "cffi": "2.1.1",
+    "pycparser": "3.0"
+  },
+  "files": [
+    {
+      "path": "python/python.exe",
+      "bytes": 107312,
+      "sha256": "372c2eae555b344520bf147be0096e009069aeca4e7f78d6aecea6d53158056a"
+    },
+    {
+      "path": "python/python3.dll",
+      "bytes": 71984,
+      "sha256": "c57bc21e131857f26db78d1512fbfcf67cac3273ee8b1cd704ed5645ec250884"
+    },
+    {
+      "path": "python/python312.dll",
+      "bytes": 6985520,
+      "sha256": "c1ce6d603041759061139f482c4b90c4ac9db676e30abf52fda66a794aab1bd0"
+    },
+    {
+      "path": "python/vcruntime140.dll",
+      "bytes": 124544,
+      "sha256": "d5e4d9a3e835fa679450145d6a7d94e36573a509317111904d9b3712c30d9066"
+    },
+    {
+      "path": "python/vcruntime140_1.dll",
+      "bytes": 49792,
+      "sha256": "1f2d41c4aa5db0bc33ebf7b66d72943a817d7ce6cbe880502a9403823633093f"
+    },
+    {
+      "path": "tesseract/tessdata/chi_sim.traineddata",
+      "bytes": 2469156,
+      "sha256": "a5fcb6f0db1e1d6d8522f39db4e848f05984669172e584e8d76b6b3141e1f730"
+    },
+    {
+      "path": "tesseract/tessdata/eng.traineddata",
+      "bytes": 4113088,
+      "sha256": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2"
+    },
+    {
+      "bytes": 7900,
+      "path": "tesseract/build-receipt.json",
+      "sha256": "00059d99220b85cdba215e11d34c30a3e38a4165ebd1ce4ea135dc25204f4706"
+    },
+    {
+      "bytes": 2208,
+      "path": "tesseract/notices/build.md",
+      "sha256": "d3e669fd5ed88be1a1904bae792199f4f70d0005fb5e479512266007d40a85a8"
+    },
+    {
+      "bytes": 1521,
+      "path": "tesseract/notices/leptonica-leptonica-license.txt",
+      "sha256": "87829abb5bbb00b55a107365da89e9a33f86c4250169e5a1e5588505be7d5806"
+    },
+    {
+      "bytes": 1773,
+      "path": "tesseract/notices/libpng-AUTHORS",
+      "sha256": "0c777e9f2a67bd4058ab91050eb7a56106c92ed038ba8fe5f54c83344f2d93ca"
+    },
+    {
+      "bytes": 5345,
+      "path": "tesseract/notices/libpng-LICENSE",
+      "sha256": "bdb0a645ea18c60507d0368379b1ac5474b92255fcc2d115e07486a7672ba526"
+    },
+    {
+      "bytes": 1235,
+      "path": "tesseract/notices/sources.json",
+      "sha256": "f9ba32c1594797915c3e087d3937a911dc642a210b551ecf1e0a98675193f8cd"
+    },
+    {
+      "bytes": 787,
+      "path": "tesseract/notices/tesseract-AUTHORS",
+      "sha256": "720862b7253993b348fe15f37ed6e0d4feb0fc8df8324284d75975d54dd29923"
+    },
+    {
+      "bytes": 11358,
+      "path": "tesseract/notices/tesseract-LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "bytes": 1002,
+      "path": "tesseract/notices/zlib-LICENSE",
+      "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2"
+    },
+    {
+      "bytes": 545280,
+      "path": "tesseract/tesseract.exe",
+      "sha256": "36345c2b9f3d0af38da1ed4fe89db1ab4ceaf68a4622b0c10a011cdac95f76f8"
+    },
+    {
+      "bytes": 3146752,
+      "path": "tesseract/tesseract55.dll",
+      "sha256": "a63518302abde57bda86611c524eda83bf9c4b7fd30f43574099b3f1fed9ef03"
+    }
+  ]
+}

@@ -21,7 +21,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:*; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:; media-src 'self' data: blob:"
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:*; img-src 'self' data: blob: http://127.0.0.1:*/api/workspace-asset http://localhost:*/api/workspace-asset; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:; media-src 'self' data: blob:"
     }
   },
   "bundle": {
@@ -31,7 +31,8 @@
       "../src": "runtime/src",
       "../public": "runtime/public",
       "../package.json": "runtime/package.json",
-      "resources/node.exe": "runtime/node.exe"
+      "resources/node.exe": "runtime/node.exe",
+      "../runtime": "runtime/runtime"
     },
     "icon": [
       "icons/32x32.png",

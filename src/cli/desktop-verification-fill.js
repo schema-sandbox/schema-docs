@@ -25,6 +25,14 @@ function optionalArgValue(name) {
   return value ? value : undefined;
 }
 
+async function readOptionalJsonArg(name) {
+  const value = optionalArgValue(name);
+  if (!value) {
+    return undefined;
+  }
+  return JSON.parse(await readFile(path.resolve(root, value), "utf8"));
+}
+
 function cloneJson(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -42,6 +50,12 @@ export function fillDesktopVerificationRecord(record, options = {}) {
   const firstWorkflowPass = options.visibleUiPass || options.firstWorkflowPass;
   const workspacePickerPass = options.visibleUiPass || options.workspacePickerPass;
   const filePickerPass = options.visibleUiPass || options.filePickerPass;
+  const regressionEvidence = [
+    options.spreadsheetPreviewEvidence,
+    options.workspaceImagesEvidence,
+    options.savePickerEvidence,
+    options.segmentedHtmlExportEvidence
+  ];
 
   filled.environment = {
     ...(filled.environment ?? {}),
@@ -51,7 +65,7 @@ export function fillDesktopVerificationRecord(record, options = {}) {
     machineProfile: options.machineProfile ?? filled.environment?.machineProfile ?? "developer"
   };
 
-  if (diagnosticsPass || firstWorkflowPass || workspacePickerPass || filePickerPass) {
+  if (diagnosticsPass || firstWorkflowPass || workspacePickerPass || filePickerPass || regressionEvidence.some(Boolean)) {
     filled.visibleUi = {
       ...(filled.visibleUi ?? {})
     };
@@ -98,6 +112,20 @@ export function fillDesktopVerificationRecord(record, options = {}) {
     };
   }
 
+  for (const [key, evidence] of [
+    ["spreadsheetPreview", options.spreadsheetPreviewEvidence],
+    ["workspaceImages", options.workspaceImagesEvidence],
+    ["savePicker", options.savePickerEvidence],
+    ["segmentedHtmlExport", options.segmentedHtmlExportEvidence]
+  ]) {
+    if (evidence !== undefined) {
+      if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) {
+        throw new Error(`Evidence for visibleUi.${key} must be a JSON object.`);
+      }
+      filled.visibleUi[key] = cloneJson(evidence);
+    }
+  }
+
   if (options.resultPass) {
     const tester = requireText("--tester <name>", options.tester ?? "");
     filled.result = {
@@ -126,12 +154,24 @@ export async function runDesktopVerificationFill(options = {}) {
   }
   const recordPath = path.resolve(root, input);
   const record = JSON.parse(await readFile(recordPath, "utf8"));
+  const spreadsheetPreviewEvidence = options.spreadsheetPreviewEvidence
+    ?? await readOptionalJsonArg("--spreadsheet-preview-evidence");
+  const workspaceImagesEvidence = options.workspaceImagesEvidence
+    ?? await readOptionalJsonArg("--workspace-images-evidence");
+  const savePickerEvidence = options.savePickerEvidence
+    ?? await readOptionalJsonArg("--save-picker-evidence");
+  const segmentedHtmlExportEvidence = options.segmentedHtmlExportEvidence
+    ?? await readOptionalJsonArg("--segmented-html-export-evidence");
   const filled = fillDesktopVerificationRecord(record, {
     visibleUiPass: options.visibleUiPass ?? hasFlag("--visible-ui-pass"),
     diagnosticsPass: options.diagnosticsPass ?? hasFlag("--diagnostics-pass"),
     firstWorkflowPass: options.firstWorkflowPass ?? hasFlag("--first-workflow-pass"),
     workspacePickerPass: options.workspacePickerPass ?? hasFlag("--workspace-picker-pass"),
     filePickerPass: options.filePickerPass ?? hasFlag("--file-picker-pass"),
+    spreadsheetPreviewEvidence,
+    workspaceImagesEvidence,
+    savePickerEvidence,
+    segmentedHtmlExportEvidence,
     resultPass: options.resultPass ?? hasFlag("--result-pass"),
     tester: options.tester ?? optionalArgValue("--tester"),
     testedAt: options.testedAt ?? optionalArgValue("--tested-at"),

@@ -158,7 +158,16 @@ async function verifyHandoffSemantics(manifest, manifestDir) {
       if (!Array.isArray(commands)) {
         failures.push(failure("handoff_summary_release_commands_missing", null));
       } else {
-        for (const required of ["npm run public-preview-package -- --json", "npm run release-artifacts", "desktop-verification-fill", "desktop-fixture-close"]) {
+        for (const required of [
+          "npm run public-preview-package -- --json",
+          "npm run release-artifacts",
+          "desktop-verification-fill",
+          "--spreadsheet-preview-evidence",
+          "--workspace-images-evidence",
+          "--save-picker-evidence",
+          "--segmented-html-export-evidence",
+          "desktop-fixture-close"
+        ]) {
           if (requiredCommandMissing(commands, required)) {
             failures.push(failure("handoff_summary_release_command_missing", required));
           }
@@ -189,8 +198,16 @@ async function verifyHandoffSemantics(manifest, manifestDir) {
       if (!handoff.includes("Portable Evidence Paths")) {
         failures.push(failure("handoff_portable_evidence_section_missing", null));
       }
-      if (!handoff.includes("desktop-verification-fill")) {
-        failures.push(failure("handoff_release_command_missing", "desktop-verification-fill"));
+      for (const required of [
+        "desktop-verification-fill",
+        "--spreadsheet-preview-evidence",
+        "--workspace-images-evidence",
+        "--save-picker-evidence",
+        "--segmented-html-export-evidence"
+      ]) {
+        if (!handoff.includes(required)) {
+          failures.push(failure("handoff_release_command_missing", required));
+        }
       }
     } catch (error) {
       failures.push(failure("handoff_unreadable", error.message));

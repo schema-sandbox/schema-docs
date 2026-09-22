@@ -47,6 +47,36 @@
       "pathFilled": false,
       "importSucceeded": false,
       "notes": ""
+    },
+    "spreadsheetPreview": {
+      "status": "not_run",
+      "realRowsVisible": false,
+      "multipleSheetsVisible": false,
+      "sheetSwitchWorked": false,
+      "notes": ""
+    },
+    "workspaceImages": {
+      "status": "not_run",
+      "pptxNaturalWidthPositive": false,
+      "pptxBrokenImageAbsent": false,
+      "pdfNaturalWidthPositive": false,
+      "pdfBrokenImageAbsent": false,
+      "notes": ""
+    },
+    "savePicker": {
+      "status": "not_run",
+      "pickerVisible": false,
+      "boundToMainWindow": false,
+      "cancelRestoredApp": false,
+      "notes": ""
+    },
+    "segmentedHtmlExport": {
+      "status": "not_run",
+      "segmentedPdfSelected": false,
+      "allSegmentsIncluded": false,
+      "htmlFileWritten": false,
+      "htmlFileNonEmpty": false,
+      "notes": ""
     }
   },
   "automatedEvidence": {

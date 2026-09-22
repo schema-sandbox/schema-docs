@@ -1,6 +1,6 @@
 {
   "releaseTarget": "v0.1.4",
-  "generatedBy": "npm run fixture-smoke",
+  "generatedBy": "npm run desktop-fixture-close",
   "results": [
     {
       "id": "F-001",
@@ -70,14 +70,13 @@
     },
     {
       "id": "F-012",
-      "status": "blocked",
-      "evidence": "desktop runtime bridge, diagnostics, native workspace/file picker hooks, visible first-workflow check, and packaged API workflow smoke exist, but no current strict desktop verification record is present yet",
-      "notes": "No previously closed F-012 result is available. Run desktop-verification-fill with explicit visible UI evidence for the current artifact, verify it with desktop-verification-check -- --strict, then run desktop-fixture-close -- --record <filled-record.json> --write so fixture-smoke can preserve the closed F-012 result."
+      "status": "pass",
+      "evidence": "desktop verification record passed strict check: G:\\Schema-Docs-v0.1.0\\output\\desktop-unblock-v0.1.4\\desktop-verification-record.filled.json",
+      "notes": "tester=Codex Windows UI automation; testedAt=2026-09-15T14:51:08.265Z; artifact=src-tauri/target/release/app.exe; artifactSha256=7886b313f0420fca23f9466764059b8be48a850b25a0fa33a14a09dfeac2ed2e; recordSha256=9a1a62b8c5d4ac1cc495c301155ce7077158a207461766d1dea67e9a50b1842f"
     }
   ],
   "statusCounts": {
-    "pass": 10,
-    "known_limit": 1,
-    "blocked": 1
+    "pass": 11,
+    "known_limit": 1
   }
 }

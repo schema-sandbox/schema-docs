@@ -90,6 +90,36 @@ export async function buildDesktopVerificationRecord(options = {}) {
         pathFilled: false,
         importSucceeded: false,
         notes: "Fill after using the native supported-file picker."
+      },
+      spreadsheetPreview: {
+        status: "not_run",
+        realRowsVisible: false,
+        multipleSheetsVisible: false,
+        sheetSwitchWorked: false,
+        notes: "Fill after importing a multi-sheet spreadsheet and visibly checking real rows on at least two sheets."
+      },
+      workspaceImages: {
+        status: "not_run",
+        pptxNaturalWidthPositive: false,
+        pptxBrokenImageAbsent: false,
+        pdfNaturalWidthPositive: false,
+        pdfBrokenImageAbsent: false,
+        notes: "Fill after visibly checking at least one rendered PPTX image and one rendered PDF image in the workspace."
+      },
+      savePicker: {
+        status: "not_run",
+        pickerVisible: false,
+        boundToMainWindow: false,
+        cancelRestoredApp: false,
+        notes: "Fill after opening the native save picker, confirming it belongs to the main window, and cancelling back to a responsive app."
+      },
+      segmentedHtmlExport: {
+        status: "not_run",
+        segmentedPdfSelected: false,
+        allSegmentsIncluded: false,
+        htmlFileWritten: false,
+        htmlFileNonEmpty: false,
+        notes: "Fill after exporting a segmented PDF to one complete, non-empty HTML file on disk."
       }
     },
     automatedEvidence: {
