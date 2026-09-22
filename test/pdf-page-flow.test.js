@@ -403,3 +403,78 @@ test("cross-page Chinese prose joins without an inserted space and hyphenated La
   assert.ok(result.markdown.includes("international analysis reaches the page edge and international results"));
   assert.doesNotMatch(result.markdown, /inter- national/);
 });
+
+test("one physical page keeps real prose, a display formula and a ruled table separate", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "combined-page-"));
+  try {
+    const source = path.join(root, "combined.pdf");
+    const python = await detectPdfLayoutExtractor();
+    const script = `import sys, ctypes as c
+import pypdfium2 as p
+import pypdfium2.raw as r
+doc = p.PdfDocument.new(); page = doc.new_page(500, 620)
+def text(font, size, x, y, value):
+    obj = r.FPDFPageObj_NewTextObj(doc, font, size)
+    data = value.encode('utf-16-le') + b'\\0\\0'
+    r.FPDFText_SetText(obj, (c.c_ushort * (len(data) // 2)).from_buffer_copy(data))
+    r.FPDFPageObj_Transform(obj, 1, 0, 0, 1, x, y); page.insert_obj(p.PdfObject(obj))
+def rule(x0, y0, x1, y1):
+    obj = r.FPDFPageObj_CreateNewPath(x0, y0); r.FPDFPath_LineTo(obj, x1, y1)
+    r.FPDFPageObj_SetStrokeColor(obj, 0, 0, 0, 255); r.FPDFPageObj_SetStrokeWidth(obj, 1)
+    r.FPDFPath_SetDrawMode(obj, 0, True); page.insert_obj(p.PdfObject(obj))
+for y, line in [(580, 'The combined acceptance page opens with an ordinary prose sentence.'),
+                (562, 'A display formula follows the prose and precedes a ruled table.'),
+                (544, 'Reading order keeps all three regions separate and in source order.')]:
+    text(b'Helvetica', 11, 40, y, line)
+text(b'Symbol', 12, 180, 505, 'x=y+z')
+for y in (160, 210, 260, 310): rule(60, y, 400, y)
+for x in (60, 230, 400): rule(x, 160, x, 310)
+for x, y, value in [(70, 280, 'Region'), (240, 280, 'Count'), (70, 230, 'North'),
+                    (240, 230, '17'), (70, 180, 'South'), (240, 180, '23')]:
+    text(b'Helvetica', 10, x, y, value)
+page.gen_content(); doc.save(sys.argv[1]); page.close(); doc.close()
+`;
+    await promisify(execFile)(python.command, [...python.args, "-c", script, source], { windowsHide: true });
+    const result = await extractPdfWithLayout(source, {
+      assetDir: path.join(root, "assets"), cacheDir: path.join(root, "cache")
+    });
+    const page = result.visualMap.pages[0], md = result.markdown;
+    const prose = ["The combined acceptance page opens with an ordinary prose sentence.",
+      "A display formula follows the prose and precedes a ruled table.",
+      "Reading order keeps all three regions separate and in source order."];
+    for (let i = 0; i < prose.length; i++) {
+      assert.equal(md.split(prose[i]).length - 1, 1, md);
+      if (i) assert.ok(md.indexOf(prose[i - 1]) < md.indexOf(prose[i]), md);
+    }
+    assert.ok(!page.requiresOcr, JSON.stringify(page.requiresOcr));
+    const tables = page.regions.filter(region => region.type === "table");
+    assert.equal(tables.length, 1, JSON.stringify(page.regions));
+    const table = tables[0];
+    assert.deepEqual([table.rowCount, table.columnCount], [3, 2], JSON.stringify(table));
+    assert.deepEqual(table.rows, [["Region", "Count"], ["North", "17"], ["South", "23"]], JSON.stringify(table.rows));
+    const formulas = page.regions.filter(region => region.type === "formula");
+    assert.ok(formulas.length >= 1, JSON.stringify(page.regions));
+    for (const formula of formulas) {
+      assert.ok(!prose.some(line => String(formula.text || "").includes(line)), JSON.stringify(formula));
+      assert.ok(formula.bbox[3] <= table.bbox[1], JSON.stringify({ formula: formula.bbox, table: table.bbox }));
+    }
+    const ir = buildPdfDocumentIr({ markdown: md, visualMap: result.visualMap });
+    assert.ok(ir.blocks.some(block => block.text === prose[0]), JSON.stringify(ir.blocks.map(block => block.type)));
+    const tableBlocks = ir.blocks.filter(block => block.tableStructure);
+    const tableRows = tableBlocks.filter(block => block.tableStructure.rowIndex !== null)
+      .sort((a, b) => a.tableStructure.rowIndex - b.tableStructure.rowIndex);
+    assert.deepEqual(tableRows.map(block => block.tableStructure.cells),
+      [["Region", "Count"], ["North", "17"], ["South", "23"]],
+      JSON.stringify(tableBlocks.map(block => block.tableStructure)));
+    assert.deepEqual(tableRows.map(block => block.tableStructure.rowRole), ["header", "row", "row"]);
+    assert.deepEqual(tableRows.map(block => block.tableStructure.status), ["structured", "structured", "structured"]);
+    assert.equal(new Set(tableBlocks.map(block => block.tableStructure.tableId)).size, 1);
+    assert.equal(tableBlocks.filter(block => block.tableStructure.rowRole === "separator").length, 1);
+    if (hasBundledPdfRuntime()) {
+      const automatic = await runPdfExtractionPipeline(source);
+      assert.equal(automatic.extractorName, "pdfplumber");
+      assert.equal(automatic.pageLedger.pages.length, 1);
+      assert.equal(automatic.markdown, md);
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
