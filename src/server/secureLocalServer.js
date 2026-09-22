@@ -57,7 +57,7 @@ function applyCommonSecurityHeaders(headers, { staticAsset = false } = {}) {
   headers["referrer-policy"] = "strict-origin-when-cross-origin";
   if (staticAsset) {
     headers["cross-origin-resource-policy"] = "same-origin";
-    headers["content-security-policy"] = "default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:*; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:; media-src 'self' data: blob:";
+    headers["content-security-policy"] = "default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:*; img-src 'self' data: blob: http://127.0.0.1:*/api/workspace-asset http://localhost:*/api/workspace-asset; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:; media-src 'self' data: blob:";
   }
   return headers;
 }

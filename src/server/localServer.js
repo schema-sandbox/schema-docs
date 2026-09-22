@@ -95,16 +95,26 @@ const markdownFile = externalMarkdown ? path.resolve(markdownPath) : path.resolv
 if (!workspacePath || !markdownPath || !assetPath || (externalMarkdown && !/\.(?:md|markdown)$/i.test(markdownFile))) {
 throw new Error("Invalid workspace image path.");
 }
+const markdownReal = await resolveExistingPath(markdownFile);
+const markdownInfo = await stat(markdownReal);
+if (!/\.(?:md|markdown)$/i.test(markdownReal) || !markdownInfo.isFile()) {
+throw new Error("Invalid workspace image path.");
+}
 let allowedRoot;
 if (externalMarkdown) {
-allowedRoot = await resolveExistingPath(path.dirname(markdownFile));
-const markdownReal = await resolveExistingPath(markdownFile);
+let workspaceReal = null;
+try {
+workspaceReal = await resolveExistingPath(workspaceRoot);
+} catch {}
+allowedRoot = workspaceReal && isSubPath(markdownReal, workspaceReal)
+? workspaceReal
+: await resolveExistingPath(path.dirname(markdownReal));
 if (!isSubPath(markdownReal, allowedRoot)) throw new Error("Invalid workspace image path.");
 } else {
 allowedRoot = await resolveExistingPath(workspaceRoot);
-await assertInsideRoot(markdownFile, allowedRoot);
+await assertInsideRoot(markdownReal, allowedRoot);
 }
-const assetFile = await resolveExistingPath(path.resolve(path.dirname(markdownFile), assetPath));
+const assetFile = await resolveExistingPath(path.resolve(path.dirname(markdownReal), assetPath));
 const extension = path.extname(assetFile).toLowerCase();
 if (!isSubPath(assetFile, allowedRoot) || !WORKSPACE_ASSET_TYPES.has(extension)) {
 throw new Error("Invalid workspace image path.");
@@ -254,6 +264,7 @@ const handlers = {
 "/api/markdown/read": (s, b) => s.readMarkdown(b.relativePath),
 "/api/markdown/delete": (s, b) => s.deleteMarkdown(b.relativePath),
 "/api/markdown/export": (s,b)=>s.exportMarkdownDocument(b.relativePath,b.outputRelativePath,b.format,{avoidOverwrite:!!b.avoidOverwrite}),
+"/api/markdown/export-segments-html": (s,b)=>s.exportSegmentedMarkdownToHtml(b.segmentRelativePaths,b.outputRelativePath,{avoidOverwrite:!!b.avoidOverwrite,title:b.title}),
 "/api/import": (s, b) => s.importFile(b.sourcePath),
 "/api/workspace/search": (s, b) => s.searchWorkspace(b.keyword),
 "/api/samples/docx": s => s.createSampleDocx(),
@@ -283,6 +294,7 @@ const handlers = {
 "/api/evidence/list": s => s.listEvidenceRecords(),
 "/api/evidence/get": (s, b) => s.getEvidenceRecord(b.evidenceId),
 "/api/evidence/delete": (s, b) => s.deleteEvidenceRecord(b.evidenceId),
+"/api/jobs/cancel": (s, b) => s.cancelJob(b.jobId, b.reason),
 "/api/tables": s => s.listTables(),
 "/api/query": (s, b) => s.runQuery(b.sql),
 "/api/ai/query-context": (s, b) => s.prepareQueryForAi(b.sql, b.options ?? {}),

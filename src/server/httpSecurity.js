@@ -78,6 +78,7 @@ export function isSafeWorkspaceRelativePath(value = "") {
 
 const OUTPUT_PATH_ROUTES = new Set([
   "/api/markdown/export",
+  "/api/markdown/export-segments-html",
   "/api/document/export",
   "/api/record/export-md"
 ]);
@@ -90,6 +91,15 @@ export function validatePublicApiPayload(route, body = {}) {
     if (!isSafeWorkspaceRelativePath(body.outputRelativePath)) {
       throw new HttpSecurityError(400, "unsafe_output_path", "Export outputRelativePath must be a workspace-relative path without traversal segments.", {
         outputRelativePath: body.outputRelativePath
+      });
+    }
+  }
+  if (route === "/api/markdown/export-segments-html") {
+    const segments = body.segmentRelativePaths;
+    if (!Array.isArray(segments) || !segments.length || segments.length > 10000
+      || segments.some((segmentPath) => !isSafeWorkspaceRelativePath(segmentPath) || !/\.md$/i.test(String(segmentPath)))) {
+      throw new HttpSecurityError(400, "unsafe_segment_path", "Segmented HTML export requires workspace-relative Markdown segment paths.", {
+        segmentCount: Array.isArray(segments) ? segments.length : 0
       });
     }
   }
