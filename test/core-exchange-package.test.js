@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { openOrCreateWorkspace } from "../src/core/manifest.js";
 import { createAppService } from "../src/core/appService.js";
-import { createExchangeMarkdown, frontMatter, readExchangePackage } from "../src/core/exchangePackage.js";
+import { createExchangeMarkdown, frontMatter, readExchangePackage, verifyExchangePackage, writeExchangePackage } from "../src/core/exchangePackage.js";
 import { readZipEntry } from "../src/core/zip.js";
 import { pdfBufferToMarkdown } from "../src/adapters/pdfMarkdownConverter.js";
 async function tempDir(prefix) {
@@ -135,4 +135,33 @@ test("Exchange package manifest and explanation verification", async () => {
   assert.equal(explanation.readiness.quality, "pass");
   assert.equal(explanation.receiverSummary.verdict, "trusted_with_warnings");
   assert.ok(explanation.recommendedActions.length > 0);
+});
+test("exchange package includes and verifies a sanitized DocumentIR summary", async () => {
+  const workspace = await tempDir("lft-exchange-ir-");
+  await openOrCreateWorkspace(workspace);
+  const saved = await writeExchangePackage(workspace, "packages/ir", {
+    title: "IR package",
+    body: "Document body.",
+    documentIrSummary: {
+      schema: "schema-docs.document-ir",
+      version: 1,
+      revisionId: "rev-1",
+      sourceHash: "sha256:source",
+      pageCount: 2,
+      blockCount: 4,
+      assetCount: 1,
+      quality: { state: "warning", confidence: 0.8, unresolvedCount: 1 },
+      sourcePath: "C:/must-not-be-copied.pdf",
+      body: "must not be written"
+    }
+  });
+  const irContent = await readFile(path.join(saved.packageRoot, "document.ir.json"), "utf8");
+  assert.doesNotMatch(irContent, /must-not-be-copied|must not be written/);
+  const readBack = await readExchangePackage(workspace, "packages/ir");
+  assert.equal(readBack.documentIrSummary.blockCount, 4);
+  assert.equal(readBack.documentIrSummary.quality.confidence, 0.8);
+  assert.ok(readBack.files.some(file => file.path === "document.ir.json"));
+  assert.equal((await verifyExchangePackage(workspace, "packages/ir")).hasDocumentIr, true);
+  await writeFile(path.join(saved.packageRoot, "document.ir.json"), `${JSON.stringify({ ...readBack.documentIrSummary, blockCount: 99 }, null, 2)}\n`, "utf8");
+  await assert.rejects(() => readExchangePackage(workspace, "packages/ir"), { code: "exchange_package_hash_mismatch" });
 });

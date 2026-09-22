@@ -31,8 +31,8 @@ async function createBuildTree(root, {
     await writeFixture(path.join(releaseDir, "runtime", ...relativePath.split("/")), `runtime:${relativePath}`);
   }
   await writeFixture(path.join(releaseDir, "runtime", "extra", "nested.txt"), "nested-runtime-file");
-  await writeFixture(path.join(releaseDir, "bundle", "msi", "schema-docs_0.1.0_x64_en-US.msi"), "fake-msi");
-  await writeFixture(path.join(releaseDir, "bundle", "nsis", "schema-docs_0.1.0_x64-setup.exe"), "fake-nsis");
+  await writeFixture(path.join(releaseDir, "bundle", "msi", `schema-docs_${packageVersion}_x64_en-US.msi`), "fake-msi");
+  await writeFixture(path.join(releaseDir, "bundle", "nsis", `schema-docs_${packageVersion}_x64-setup.exe`), "fake-nsis");
   await writeFixture(path.join(root, "LICENSE"), "license\n");
   await writeFixture(path.join(root, "README.md"), "readme\n");
   await writeFixture(path.join(root, "THIRD_PARTY_NOTICES.md"), "notices\n");
@@ -201,6 +201,39 @@ test("prepareWindowsRelease does not replace existing assets when compression fa
   for (const [name, content] of Object.entries(existing)) {
     assert.equal(await readFile(path.join(outputDir, name), "utf8"), content);
   }
+  assert.deepEqual(await readdir(tempRoot), []);
+  await rm(root, { recursive: true, force: true });
+});
+
+test("prepareWindowsRelease preserves installers from earlier release versions", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "schema-docs-release-preserve-history-test-"));
+  const tempRoot = path.join(root, "temp");
+  await mkdir(tempRoot);
+  await createBuildTree(root, { packageVersion: "0.1.4" });
+  const outputDir = path.join(root, "release", "windows");
+  const previousArtifacts = {
+    "schema-docs_0.1.3_x64_en-US.msi": "previous-msi",
+    "schema-docs_0.1.3_x64-setup.exe": "previous-nsis",
+    "schema-docs_0.1.3_x64-portable.zip": "previous-zip"
+  };
+  for (const [name, content] of Object.entries(previousArtifacts)) {
+    await writeFixture(path.join(outputDir, name), content);
+  }
+
+  const result = await prepareWindowsRelease({
+    root,
+    tempRoot,
+    compressArchive: fakeArchive
+  });
+
+  assert.equal(result.ok, true);
+  for (const [name, content] of Object.entries(previousArtifacts)) {
+    assert.equal(await readFile(path.join(outputDir, name), "utf8"), content);
+  }
+  assert.equal(
+    await readFile(path.join(outputDir, "schema-docs_0.1.4_x64_en-US.msi"), "utf8"),
+    "fake-msi"
+  );
   assert.deepEqual(await readdir(tempRoot), []);
   await rm(root, { recursive: true, force: true });
 });

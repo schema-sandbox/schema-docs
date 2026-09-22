@@ -33,6 +33,8 @@ for (const sheet of sheets) {
 const columns = (sheet.columns || []).map((column) => column.name);
 const rows = (sheet.previewRows || []).map((row) => columns.map((column) => row[column] ?? ""));
 lines.push(`## ${sheet.name || sheet.sheetId || "Sheet"}`, "");
+if (sheet.sourceFormulaCount > 0) lines.push('> Formula cells show saved values from the workbook; formulas are not recalculated.', '');
+if (sheet.mergedRanges?.length) lines.push(`> Merged cells are displayed as a flat table. Source ranges: ${sheet.mergedRanges.join(', ')}.`, '');
 const preambleRows = sheet.preambleRows || [];
 const preambleRowNumbers = sheet.preambleRowNumbers || [];
 for (let index = 0; index < preambleRows.length;) {

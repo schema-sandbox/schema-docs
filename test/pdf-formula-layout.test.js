@@ -21,7 +21,7 @@ function reconstruct(components) {
   // Formula reconstruction is pure Python and must stay usable when the
   // optional pdfplumber adapter is not installed. Isolated mode plus -S keeps
   // this regression check independent of user and system site-packages.
-  const result = spawnSync("python", ["-I", "-S", "-X", "utf8", "-c", script, extractorPath], {
+  const result = spawnSync("python", ["-B", "-I", "-S", "-X", "utf8", "-c", script, extractorPath], {
     cwd: repoRoot,
     input: JSON.stringify(components),
     encoding: "utf8",
@@ -391,6 +391,55 @@ test("stacked display fractions do not become superscripts", () => {
   assert.doesNotMatch(latex, /\^\{dL\}/);
 });
 
+test("display fragments join the adjacent baseline before fraction reconstruction", () => {
+  const roman = "CMR10";
+  const fragment = {
+    ...component([glyph("l", roman, 10, 248, 305)]),
+    page: 1,
+    pageWidth: 612,
+    text: "logn",
+    displayFragment: true,
+    editableMathCandidate: false,
+    needsVisualFallback: false,
+    displayMathLine: false,
+    signalCount: 0,
+    mathRatio: 0.1,
+    _chars: [..."logn"].map((text, index) => glyph(text, roman, 10, 248 + index * 5, 305))
+  };
+  const baseline = {
+    ...component([glyph("n", "CMMI10", 10, 205, 312), glyph("=", roman, 10, 288, 312)]),
+    page: 1,
+    pageWidth: 612,
+    text: "n=",
+    displayFragment: true,
+    editableMathCandidate: true,
+    needsVisualFallback: false,
+    displayMathLine: true,
+    signalCount: 1,
+    mathRatio: 0.5,
+    _chars: [glyph("n", "CMMI10", 10, 205, 312), glyph("=", roman, 10, 288, 312)]
+  };
+  const script = [
+    "import importlib.util,json,sys,types",
+    "spec=importlib.util.spec_from_file_location('extractor',sys.argv[1])",
+    "module=importlib.util.module_from_spec(spec)",
+    "spec.loader.exec_module(module)",
+    "page=types.SimpleNamespace(chars=[],width=612,height=792)",
+    "regions=module.merge_complex_formula_regions(json.loads(sys.stdin.read()),page)",
+    "print(json.dumps([{k:v for k,v in r.items() if k!='_chars'} for r in regions]))"
+  ].join(";");
+  const result = spawnSync("python", ["-c", script, extractorPath], {
+    cwd: repoRoot,
+    input: JSON.stringify([fragment, baseline]),
+    encoding: "utf8",
+    env: { ...process.env, PYTHONUTF8: "1", PYTHONDONTWRITEBYTECODE: "1" }
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const regions = JSON.parse(result.stdout);
+  assert.equal(regions.length, 1);
+  assert.match(regions[0].text, /logn/);
+});
+
 test("centred products remain display formulas without detached superscripts", () => {
   const main = [
     glyph("s", "CMMI10", 10, 290.2, 352.9),
@@ -655,6 +704,19 @@ test("Computer Modern private-use delimiter pieces collapse into editable fences
   const latex = reconstruct([component(chars)]);
   assert.equal(latex, "(x)");
   assert.equal(isValidEditableLatex(latex), true);
+});
+
+test("Symbol-font private-use braces are mapped instead of leaking into formulas", () => {
+  const chars = [
+    glyph("\uf8f1", "Symbol", 10, 0, 0, 5),
+    glyph("x", "CMMI10", 10, 8, 0),
+    glyph("\uf8fc", "Symbol", 10, 16, 0, 5)
+  ];
+  const latex = reconstruct([component(chars)]);
+  assert.equal(latex.includes("\uf8f1"), false);
+  assert.equal(latex.includes("\uf8fc"), false);
+  assert.equal(isValidEditableLatex(latex), true);
+  assert.equal(repairCid("ABCDEF+LucidaBrightMathSymbol", 1), "(cid:1)", "subset CID identity is not a font-family encoding");
 });
 
 test("private-use and CID remnants are never accepted as editable LaTeX", () => {

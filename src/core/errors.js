@@ -7,6 +7,10 @@ this.details = details;
 }
 }
 const ERROR_GUIDANCE = {
+  manifest_busy: "Another process is saving this workspace. Retry after it finishes.",
+  manifest_write_conflict: "Reload the workspace and reapply the change. The newer record was preserved.",
+  manifest_read_failed: "Check workspace permissions and storage availability before retrying.",
+  document_revision_conflict: "Keep your edits, reopen the current document, and reapply them before saving.",
   ai_confirmation_required: "Check confirmation and click Confirm Send.",
   ai_content_empty: "Paste or load content first.",
   ai_handoff_context_empty: "Load a record or save an AI handoff bundle.",
@@ -34,6 +38,7 @@ const ERROR_GUIDANCE = {
   csv_empty: "Import a CSV with headers and data rows.",
   document_corrupt: "Save a fresh DOCX copy and try again.",
   document_converter_not_found: "Try importing as another format.",
+  conversion_checkpoint_invalid: "Discard the stale checkpoint and retry conversion.",
   document_extraction_empty: "The previous Markdown was kept. Choose Auto or an installed extractor, then retry.",
   document_extraction_fallback_preserved: "The previous Markdown was kept. Install or repair the selected extractor before retrying.",
   document_not_found: "Select a document or import a file.",

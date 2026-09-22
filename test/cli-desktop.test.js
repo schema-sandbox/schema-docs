@@ -11,6 +11,7 @@ import {
   desktopFixtureClosePath,
   desktopRuntimeCheckPath,
   desktopVerificationCheckPath,
+  desktopVerificationFillPath,
   desktopVerificationRecordPath,
   desktopWorkflowSmokePath,
   execFileAsync,
@@ -54,6 +55,9 @@ async function runCliJson(scriptPath, args) {
   const { stdout } = await execFileAsync(process.execPath, [scriptPath, ...args], {
     cwd: projectRoot,
     env: { ...process.env, NODE_ENV: "test" }
+  }).catch(error => {
+    error.message += `\n${error.stdout || ""}`;
+    throw error;
   });
   return JSON.parse(stdout);
 }
@@ -100,6 +104,8 @@ test("desktop GUI smokes pass a requested start port to the packaged app", async
   for (const relativePath of ["src/cli/desktop-app-smoke.js", "src/cli/desktop-workflow-smoke.js"]) {
     const source = await readFile(path.join(projectRoot, relativePath), "utf8");
     assert.match(source, /SCHEMA_DOCS_DESKTOP_PORT: String\(startPort\)/, relativePath);
+    assert.match(source, /SCHEMA_DOCS_RUNTIME_SESSION_DIR: runtimeSessionRoot/, relativePath);
+    assert.match(source, /runtimePids/, relativePath);
   }
   const rustSource = await readFile(path.join(projectRoot, "src-tauri/src/lib.rs"), "utf8");
   assert.match(rustSource, /std::env::var\("SCHEMA_DOCS_DESKTOP_PORT"\)/);
@@ -163,6 +169,36 @@ function desktopVerificationPassRecord({ bytes = 8725504, sha256 = "95881102234c
         status: "pass",
         pathFilled: true,
         importSucceeded: true,
+        notes: ""
+      },
+      spreadsheetPreview: {
+        status: "pass",
+        realRowsVisible: true,
+        multipleSheetsVisible: true,
+        sheetSwitchWorked: true,
+        notes: ""
+      },
+      workspaceImages: {
+        status: "pass",
+        pptxNaturalWidthPositive: true,
+        pptxBrokenImageAbsent: true,
+        pdfNaturalWidthPositive: true,
+        pdfBrokenImageAbsent: true,
+        notes: ""
+      },
+      savePicker: {
+        status: "pass",
+        pickerVisible: true,
+        boundToMainWindow: true,
+        cancelRestoredApp: true,
+        notes: ""
+      },
+      segmentedHtmlExport: {
+        status: "pass",
+        segmentedPdfSelected: true,
+        allSegmentsIncluded: true,
+        htmlFileWritten: true,
+        htmlFileNonEmpty: true,
         notes: ""
       }
     },
@@ -233,6 +269,8 @@ test("desktop bridge smoke selects runtime node.exe when it is bundled", async (
   const bundledNode = path.join(runtimeRoot, nodeName);
   await mkdir(runtimeRoot, { recursive: true });
   await cp(path.join(projectRoot, "src"), path.join(runtimeRoot, "src"), { recursive: true });
+  await mkdir(path.join(runtimeRoot, "public"), { recursive: true });
+  await copyFile(path.join(projectRoot, "public", "tableGeometry.js"), path.join(runtimeRoot, "public", "tableGeometry.js"));
   await writeFile(path.join(runtimeRoot, "package.json"), JSON.stringify({ type: "module" }));
   await mkdir(path.join(runtimeRoot, "public"), { recursive: true });
   await writeFile(path.join(runtimeRoot, "public", "index.html"), "<!doctype html>");
@@ -251,6 +289,13 @@ test("desktop bridge smoke selects runtime node.exe when it is bundled", async (
     assert.equal(result.isBundled, true);
     assert.equal(result.nodePath, bundledNode);
     assert.equal(result.runtime.port, 18261);
+    assert.deepEqual(result.cleanup, {
+      ok: true,
+      forced: false,
+      stillRunning: false,
+      sessionRemoved: true,
+      error: ""
+    });
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -306,6 +351,10 @@ test("desktop-verification-record generates a partial record from smoke outputs"
   assert.equal(record.sendGate.sensitivePreviewDecision, "review_recommended");
   assert.equal(record.sendGate.credentialSendBlocked, true);
   assert.equal(record.visibleUi.firstWorkflow.status, "not_run");
+  assert.equal(record.visibleUi.spreadsheetPreview.status, "not_run");
+  assert.equal(record.visibleUi.workspaceImages.status, "not_run");
+  assert.equal(record.visibleUi.savePicker.status, "not_run");
+  assert.equal(record.visibleUi.segmentedHtmlExport.status, "not_run");
   const generatedRecordPath = path.join(workspace, "generated", "desktop-record.json");
   const generated = await execFileAsync(process.execPath, [
     desktopVerificationRecordPath,
@@ -349,6 +398,10 @@ test("desktop-verification-check validates template and strict pass records", as
       assert.ok(result.failures.some((failure) => failure.code === "desktop_diagnostics_node_not_available"));
       assert.ok(result.failures.some((failure) => failure.code === "desktop_diagnostics_runtime_paths_not_visible"));
       assert.ok(result.failures.some((failure) => failure.code === "desktop_diagnostics_session_logs_not_visible"));
+      assert.ok(result.failures.some((failure) => failure.code === "spreadsheet_preview_not_pass"));
+      assert.ok(result.failures.some((failure) => failure.code === "workspace_images_not_pass"));
+      assert.ok(result.failures.some((failure) => failure.code === "save_picker_not_pass"));
+      assert.ok(result.failures.some((failure) => failure.code === "segmented_html_export_not_pass"));
       assert.ok(result.failures.some((failure) => failure.code === "result_tester_required"));
       assert.ok(result.nextActions.some((action) => action.includes("WebView2")));
       assert.ok(result.nextActions.some((action) => action.includes("Node.js version")));
@@ -371,6 +424,138 @@ test("desktop-verification-check validates template and strict pass records", as
   const strictResult = JSON.parse(strict.stdout);
   assert.equal(strictResult.ok, true);
   assert.equal(strictResult.strict, true);
+});
+
+test("desktop-verification-check requires every regression UI boolean in strict mode", async () => {
+  const workspace = await mkdtemp(path.join(os.tmpdir(), "schema-docs-desktop-regression-gate-"));
+  const artifactsResult = await execFileAsync(process.execPath, [releaseArtifactsPath], { cwd: projectRoot });
+  const artifactsManifest = JSON.parse(artifactsResult.stdout);
+  const appArtifact = artifactsManifest.artifacts.find((a) => a.path.endsWith("app.exe") || a.path.endsWith("/app"));
+  const actualHash = appArtifact?.sha256 || "95881102234c4bd0345b6d3ac39e89e1f9ae0bf89ea80e93d4e42786bd59a58d";
+  const actualBytes = appArtifact?.bytes || 8725504;
+  const cases = [
+    ["spreadsheetPreview", "realRowsVisible", "spreadsheet_real_rows_not_visible"],
+    ["spreadsheetPreview", "multipleSheetsVisible", "spreadsheet_multiple_sheets_not_visible"],
+    ["spreadsheetPreview", "sheetSwitchWorked", "spreadsheet_sheet_switch_not_worked"],
+    ["workspaceImages", "pptxNaturalWidthPositive", "workspace_images_pptx_natural_width_not_positive"],
+    ["workspaceImages", "pptxBrokenImageAbsent", "workspace_images_pptx_broken_image_present"],
+    ["workspaceImages", "pdfNaturalWidthPositive", "workspace_images_pdf_natural_width_not_positive"],
+    ["workspaceImages", "pdfBrokenImageAbsent", "workspace_images_pdf_broken_image_present"],
+    ["savePicker", "pickerVisible", "save_picker_not_visible"],
+    ["savePicker", "boundToMainWindow", "save_picker_not_bound_to_main_window"],
+    ["savePicker", "cancelRestoredApp", "save_picker_cancel_not_restored"],
+    ["segmentedHtmlExport", "segmentedPdfSelected", "segmented_html_pdf_not_selected"],
+    ["segmentedHtmlExport", "allSegmentsIncluded", "segmented_html_segments_incomplete"],
+    ["segmentedHtmlExport", "htmlFileWritten", "segmented_html_file_not_written"],
+    ["segmentedHtmlExport", "htmlFileNonEmpty", "segmented_html_file_empty"]
+  ];
+
+  for (const [section, field, expectedCode] of cases) {
+    const record = desktopVerificationPassRecord({ bytes: actualBytes, sha256: actualHash });
+    record.visibleUi[section][field] = false;
+    const recordPath = path.join(workspace, `${section}-${field}.json`);
+    await writeFile(recordPath, JSON.stringify(record, null, 2));
+    const result = await rejectCliJson(desktopVerificationCheckPath, ["--strict", recordPath]);
+    assert.equal(result.ok, false, `${section}.${field}`);
+    assert.ok(result.failures.some((failure) => failure.code === expectedCode), `${section}.${field}`);
+  }
+});
+
+test("desktop-verification-fill imports explicit regression evidence without auto-passing partial items", async () => {
+  const workspace = await mkdtemp(path.join(os.tmpdir(), "schema-docs-desktop-regression-fill-"));
+  const artifactsResult = await execFileAsync(process.execPath, [releaseArtifactsPath], { cwd: projectRoot });
+  const artifactsManifest = JSON.parse(artifactsResult.stdout);
+  const appArtifact = artifactsManifest.artifacts.find((a) => a.path.endsWith("app.exe") || a.path.endsWith("/app"));
+  const actualHash = appArtifact?.sha256 || "95881102234c4bd0345b6d3ac39e89e1f9ae0bf89ea80e93d4e42786bd59a58d";
+  const actualBytes = appArtifact?.bytes || 8725504;
+  const record = desktopVerificationPassRecord({ bytes: actualBytes, sha256: actualHash });
+  for (const key of ["spreadsheetPreview", "workspaceImages", "savePicker", "segmentedHtmlExport"]) {
+    record.visibleUi[key].status = "not_run";
+    for (const field of Object.keys(record.visibleUi[key])) {
+      if (typeof record.visibleUi[key][field] === "boolean") {
+        record.visibleUi[key][field] = false;
+      }
+    }
+  }
+  const recordPath = path.join(workspace, "desktop-record.partial.json");
+  const outPath = path.join(workspace, "desktop-record.filled.json");
+  await writeFile(recordPath, JSON.stringify(record, null, 2));
+  const legacyVisibleUiPath = path.join(workspace, "desktop-record.legacy-visible-ui.json");
+  await runCliJson(desktopVerificationFillPath, [
+    "--record",
+    recordPath,
+    "--visible-ui-pass",
+    "--out",
+    legacyVisibleUiPath
+  ]);
+  const legacyVisibleUiRecord = JSON.parse(await readFile(legacyVisibleUiPath, "utf8"));
+  assert.equal(legacyVisibleUiRecord.visibleUi.spreadsheetPreview.status, "not_run");
+  assert.equal(legacyVisibleUiRecord.visibleUi.workspaceImages.status, "not_run");
+  assert.equal(legacyVisibleUiRecord.visibleUi.savePicker.status, "not_run");
+  assert.equal(legacyVisibleUiRecord.visibleUi.segmentedHtmlExport.status, "not_run");
+  const legacyStrictResult = await rejectCliJson(desktopVerificationCheckPath, ["--strict", legacyVisibleUiPath]);
+  assert.ok(legacyStrictResult.failures.some((failure) => failure.code === "spreadsheet_preview_not_pass"));
+
+  const evidenceByKey = {
+    spreadsheetPreview: {
+      status: "pass",
+      realRowsVisible: true,
+      multipleSheetsVisible: true,
+      sheetSwitchWorked: true,
+      notes: "Visible real rows on Sheet1 and Sheet2."
+    },
+    workspaceImages: {
+      status: "pass",
+      pptxNaturalWidthPositive: true,
+      pptxBrokenImageAbsent: true,
+      pdfNaturalWidthPositive: true,
+      pdfBrokenImageAbsent: true,
+      notes: "PPTX and PDF images rendered in the workspace."
+    },
+    savePicker: {
+      status: "pass",
+      pickerVisible: true,
+      boundToMainWindow: true,
+      cancelRestoredApp: true,
+      notes: "Save picker cancelled back to a responsive main window."
+    },
+    segmentedHtmlExport: {
+      status: "pass",
+      segmentedPdfSelected: true,
+      allSegmentsIncluded: true,
+      htmlFileWritten: true,
+      htmlFileNonEmpty: true,
+      notes: "First and last PDF segments are present in the saved HTML."
+    }
+  };
+  const evidenceArgs = [];
+  const optionByKey = {
+    spreadsheetPreview: "--spreadsheet-preview-evidence",
+    workspaceImages: "--workspace-images-evidence",
+    savePicker: "--save-picker-evidence",
+    segmentedHtmlExport: "--segmented-html-export-evidence"
+  };
+  for (const [key, evidence] of Object.entries(evidenceByKey)) {
+    const evidencePath = path.join(workspace, `${key}.json`);
+    await writeFile(evidencePath, JSON.stringify(evidence, null, 2));
+    evidenceArgs.push(optionByKey[key], evidencePath);
+  }
+
+  const fillResult = await runCliJson(desktopVerificationFillPath, [
+    "--record",
+    recordPath,
+    ...evidenceArgs,
+    "--out",
+    outPath
+  ]);
+  assert.equal(fillResult.ok, true);
+  const filled = JSON.parse(await readFile(outPath, "utf8"));
+  assert.deepEqual(filled.visibleUi.spreadsheetPreview, evidenceByKey.spreadsheetPreview);
+  assert.deepEqual(filled.visibleUi.workspaceImages, evidenceByKey.workspaceImages);
+  assert.deepEqual(filled.visibleUi.savePicker, evidenceByKey.savePicker);
+  assert.deepEqual(filled.visibleUi.segmentedHtmlExport, evidenceByKey.segmentedHtmlExport);
+  const strictResult = await runCliJson(desktopVerificationCheckPath, ["--strict", outPath]);
+  assert.equal(strictResult.ok, true);
 });
 test("desktop-fixture-close only closes F-012 from a strict desktop verification record", async (t) => {
   const workspace = await mkdtemp(path.join(os.tmpdir(), "schema-docs-fixture-close-"));

@@ -1,6 +1,7 @@
 import path from "node:path";
 import { copyFile, mkdir, stat, readdir, readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { createId, nowIso } from "./ids.js";
 import { openOrCreateWorkspace, readManifest, writeManifest } from "./manifest.js";
 import { AppError } from "./errors.js";
@@ -10,8 +11,9 @@ return createHash("sha256").update(buffer).digest("hex");
 }
 export async function computeFileHash(filePath) {
 try {
-const buffer = await readFile(filePath);
-return computeBufferHash(buffer);
+const digest = createHash("sha256");
+for await (const chunk of createReadStream(filePath)) digest.update(chunk);
+return digest.digest("hex");
 } catch {
 return "";
 }

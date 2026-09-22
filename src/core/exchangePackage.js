@@ -13,6 +13,32 @@ import { buildExchangePackageGuidance, getPackageReadiness } from "./exchangePac
 function hashBuffer(content) {
 return `sha256:${createHash("sha256").update(content).digest("hex")}`;
 }
+function normalizeDocumentIrSummary(value) {
+ if (!value) return null;
+ const source = value.summary ?? value;
+ const pages = Array.isArray(source.pages) ? source.pages : [];
+ const blocks = Array.isArray(source.blocks)
+  ? source.blocks
+  : pages.flatMap(page => Array.isArray(page.blocks) ? page.blocks : []);
+ const assets = Array.isArray(source.assets) ? source.assets : [];
+ const quality = source.quality ?? source.qualitySummary ?? {};
+ return {
+  schema: String(source.schema ?? ""),
+  version: Number(source.version ?? 0),
+  revisionId: String(source.revisionId ?? ""),
+  sourceHash: String(source.sourceHash ?? source.source?.hash ?? ""),
+  pageCount: Number(source.pageCount ?? pages.length ?? 0),
+  blockCount: Number(source.blockCount ?? blocks.length ?? 0),
+  assetCount: Number(source.assetCount ?? assets.length ?? 0),
+  quality: {
+   state: String(quality.state ?? ""),
+   confidence: quality.confidence === undefined || quality.confidence === null
+    ? null
+    : (typeof quality.confidence === "number" ? quality.confidence : String(quality.confidence)),
+   unresolvedCount: Number(quality.unresolvedCount ?? quality.unresolved ?? 0)
+  }
+ };
+}
 async function listFilesRecursive(dir) {
 const entries = await readdir(dir, { withFileTypes: true });
 const files = await Promise.all(entries.map(async (entry) => {
@@ -130,6 +156,7 @@ bodyLength: body.length
 export function createExchangePackageManifest(input) {
 const capability = createDocumentCapabilityManifest();
 const tables = input.packageTables ?? [];
+const documentIrSummary = normalizeDocumentIrSummary(input.documentIrSummary);
 const audit = input.audit ? {
 id: input.audit.id ?? "",
 kind: input.audit.kind ?? "",
@@ -172,12 +199,18 @@ documentSchema: {
 path: "document.schema.json",
 hash: input.documentSchemaHash ?? ""
 },
+documentIr: documentIrSummary ? {
+ path: "document.ir.json",
+ hash: input.documentIrHash ?? "",
+ summary: documentIrSummary
+} : null,
 createdAt: input.createdAt ?? new Date().toISOString(),
 source: input.source ?? "",
 apiBaseUrl: input.apiBaseUrl ?? "",
 model: input.model ?? "",
 includes: {
 document: true,
+documentIr: Boolean(documentIrSummary),
 evidence: Boolean(input.evidence),
 audit: Boolean(input.audit),
 queryResult: Boolean(input.queryResult),
@@ -295,7 +328,27 @@ export async function readExchangePackage(workspacePath, packageRelativePath) {
   const evidenceHash = typeof manifest.evidenceFile === "string"
    ? ""
    : manifest.evidenceFile.hash;
-  files.push(await verifyPackageHash(packageRoot, evidencePath, evidenceHash, "evidence log"));
+ files.push(await verifyPackageHash(packageRoot, evidencePath, evidenceHash, "evidence log"));
+ }
+ if (manifest.documentIr) {
+  const documentIrPath = typeof manifest.documentIr === "string"
+   ? manifest.documentIr
+   : manifest.documentIr.path;
+  const documentIrHash = typeof manifest.documentIr === "string"
+   ? ""
+   : manifest.documentIr.hash;
+  const documentIrFile = await verifyPackageHash(packageRoot, documentIrPath, documentIrHash, "DocumentIR summary");
+  try {
+   const storedSummary = normalizeDocumentIrSummary(JSON.parse((await readFile(documentIrFile.absolutePath, "utf8"))));
+   const declaredSummary = typeof manifest.documentIr === "string" ? null : normalizeDocumentIrSummary(manifest.documentIr.summary);
+   if (declaredSummary && JSON.stringify(storedSummary) !== JSON.stringify(declaredSummary)) {
+    throw new AppError("exchange_package_document_ir_mismatch", "Exchange package DocumentIR summary does not match its manifest.");
+   }
+  } catch (error) {
+   if (error instanceof AppError) throw error;
+   throw new AppError("exchange_package_document_ir_invalid", "Exchange package DocumentIR summary is invalid.", { cause: error.message });
+  }
+  files.push(documentIrFile);
  }
  for (const table of manifest.tables ?? []) {
   for (const format of table.formats ?? []) {
@@ -313,6 +366,7 @@ export async function readExchangePackage(workspacePath, packageRelativePath) {
   packageRoot,
   manifest,
   document: parseExchangeMarkdownDocument(canonicalContent),
+  documentIrSummary: manifest.documentIr?.summary ?? null,
   files,
   valid: true
  };
@@ -335,6 +389,11 @@ export async function writeExchangePackage(workspacePath, packageRelativePath, i
  const documentSchemaPath = await assertSafeWritePath(path.join(packageRoot, "document.schema.json"), workspacePath, [".json"]);
  const manifestPath = await assertSafeWritePath(path.join(packageRoot, "manifest.json"), workspacePath, [".json"]);
  const evidencePath = await assertSafeWritePath(path.join(packageRoot, "evidence.jsonl"), workspacePath, [".jsonl"]);
+ const documentIrSummary = normalizeDocumentIrSummary(input.documentIrSummary);
+ const documentIrContent = documentIrSummary ? `${JSON.stringify(documentIrSummary, null, 2)}\n` : "";
+ const documentIrPath = documentIrSummary
+  ? await assertSafeWritePath(path.join(packageRoot, "document.ir.json"), workspacePath, [".json"])
+  : "";
  const queryCsvPath = input.queryResult
   ? await assertSafeWritePath(path.join(packageRoot, "tables", "query_result.csv"), workspacePath, [".csv"])
   : "";
@@ -344,6 +403,7 @@ export async function writeExchangePackage(workspacePath, packageRelativePath, i
  await writeFile(documentPath, markdown, "utf8");
  await writeFile(documentSchemaPath, documentSchema, "utf8");
  await writeFile(evidencePath, evidenceLines, "utf8");
+ if (documentIrSummary) await writeFile(documentIrPath, documentIrContent, "utf8");
  if (input.queryResult) {
   const columns = input.queryResult.columns ?? [];
   const rows = input.queryResult.rows ?? [];
@@ -382,6 +442,8 @@ export async function writeExchangePackage(workspacePath, packageRelativePath, i
   documentHash,
   documentSchemaHash,
   evidenceHash,
+  documentIrSummary,
+  documentIrHash: documentIrSummary ? hashBuffer(Buffer.from(documentIrContent, "utf8")) : "",
   packageTables,
   packageExports
  });
@@ -395,6 +457,7 @@ export async function writeExchangePackage(workspacePath, packageRelativePath, i
   documentSchemaPath,
   manifestPath,
   evidencePath,
+  documentIrPath,
   queryCsvPath,
   queryMarkdownPath,
   packageExports,
@@ -449,6 +512,7 @@ export async function explainExchangePackage(workspacePath, packageRelativePath)
    requiredEvidence: m.capability.requiredEvidence
   } : null,
   includes: m.includes || {},
+  documentIr: m.documentIr?.summary ?? null,
   tables: (m.tables || []).map(t => ({
    id: t.id,
    title: t.title,
@@ -512,6 +576,7 @@ export async function verifyExchangePackage(workspacePath, packageRelativePath) 
   hasMarkdown: true,
   hasAuditTrail: !!m.audit,
   hasQualityReport: (m.conversionQuality || []).length > 0,
+  hasDocumentIr: Boolean(m.documentIr),
   noRawSensitiveFiles: !hasRawSensitiveFile,
   apiConsumptionReady: true,
   schemaVersion: m.version

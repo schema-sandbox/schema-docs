@@ -36,7 +36,7 @@ export function configureFirstReleaseUi({ $ }) {
   workspacePath.setAttribute("aria-label", "Current workspace location");
  }
  if (chooseWorkspace) chooseWorkspace.textContent = "Choose or create workspace...";
- [$("openWorkspace"), $("createTempWorkspace"), $("runFirstWorkflow"), $("desktopDiagnostics")]
+ [$("openWorkspace"), $("createTempWorkspace")]
   .filter(Boolean)
   .forEach((button) => {
    button.classList.add("hidden");
@@ -133,8 +133,12 @@ export function configureFirstReleaseUi({ $ }) {
  );
 
  const testTools = makeDetails("Sample and test tools", "Sample documents and diagnostic output");
+ const desktopChecks = document.createElement("div");
+ desktopChecks.className = "row section-row";
+ move(desktopChecks, $("desktopDiagnostics"), $("runFirstWorkflow"));
  $("createSampleDocx")?.classList.add("hidden");
  move(testTools,
+  desktopChecks,
   $("createSampleDocx"),
   document.querySelector(".output-console-panel")
  );

@@ -7,11 +7,13 @@ import { createAiFeedRunbookPanel } from "./aiFeedRunbookPanel.js";
 import { createAiSendGatePanel } from "./aiSendGatePanel.js";
 import { createAiSummonPanel } from "./aiSummonPanel.js";
 import { createDocumentFlowPanel } from "./documentFlowPanel.js";
+import { createDatasetPreviewPanel, findReadyDataset } from "./datasetPreviewPanel.js";
 import { createExchangePackagePanel } from "./exchangePackagePanel.js";
 import { createImportUploadPanel } from "./importUploadPanel.js";
 import { createI18nPanel } from "./i18nPanel.js";
 import { createManifestPanel } from "./manifestPanel.js";
-import { createMarkdownWorkbenchPanel } from "./markdownWorkbenchPanel.js";
+import { loadOptionalManifestUiData, refreshedDatasetSelection } from "./manifestRefresh.js";
+import { createExportStatusController, createMarkdownWorkbenchPanel, requestExportSavePath } from "./markdownWorkbenchPanel.js";
 import { createProductModePanel } from "./productModePanel.js";
 import { createQueryPanel } from "./queryPanel.js";
 import { createSearchResultsPanel } from "./searchResultsPanel.js";
@@ -53,6 +55,7 @@ markdownDirty: false
 };
 const largeEditorLoadSourceBytes = 5 * 1024 * 1024;
 const $ = (id) => document.getElementById(id);
+const datasetPreviewPanel = createDatasetPreviewPanel({ $, state });
 const importFileInput = $("fileInput");
 if (importFileInput) importFileInput.accept = ".md,.markdown,.docx,.pptx,.pdf,.txt,.csv,.xlsx,.xls";
 const markdownImportButton = $("markdownImportFile");
@@ -407,7 +410,28 @@ function workspacePath() {
  setWorkspacePath(value);
  return value;
 }
+function comparableWorkspacePath(value) {
+ const normalized = String(value || "").trim().replace(/\\/g, "/").replace(/\/+$/, "");
+ return /^[a-z]:\//i.test(normalized) || normalized.startsWith("//")
+  ? normalized.toLowerCase()
+  : normalized;
+}
+function clearDatasetPreviewSelection() {
+ datasetPreviewPanel.clear();
+ const hasDatasetSelection = [state.selectedRecord, state.currentRecord].some((record) => {
+  const sourceType = String(record?.sourceType || "").toLowerCase();
+  return record?.kind === "dataset" || ["csv", "xls", "xlsx"].includes(sourceType);
+ });
+ if (hasDatasetSelection) {
+  state.currentRecord = null;
+  state.selectedRecord = null;
+  if ($("recordId")) $("recordId").value = "";
+ }
+}
 function setWorkspacePath(value) {
+ const changedWorkspace = comparableWorkspacePath(state.workspacePath)
+  && comparableWorkspacePath(state.workspacePath) !== comparableWorkspacePath(value);
+ if (changedWorkspace) clearDatasetPreviewSelection();
  $("workspacePath").value = value;
  state.workspacePath = value;
  localStorage.setItem("workspacePath", value);
@@ -712,6 +736,14 @@ async function run(action) {
  try {
   const value = await action();
   print(value);
+  if (value?.cancelled === true) {
+   if (isBtn) {
+    btn.innerHTML = origHtml;
+    btn.disabled = false;
+    btn.removeAttribute("aria-busy");
+   }
+   return value;
+  }
   if (isBtn) {
    btn.textContent = window.translateText ? window.translateText("Success") : "Success";
    btn.classList.add("btn-success-state");
@@ -740,18 +772,28 @@ async function run(action) {
 }
 async function refreshManifest() {
  try {
-  const [manifest, capabilities, adapterCapabilities, updates] = await Promise.all([
-   api("/api/manifest"),
-   api("/api/document/capabilities"),
-   apiGet("/api/adapter/capabilities"),
-   api("/api/workspace/detect-source-changes", {}).catch(() => [])
-  ]);
+  const manifest = await api("/api/manifest");
+  manifestPanel.renderManifest(manifest);
+  renderApiProfiles(manifest.apiProfiles ?? []);
+  const refreshedDataset = refreshedDatasetSelection(manifest, state.selectedRecord);
+  if (refreshedDataset === null) {
+   clearDatasetPreviewSelection();
+  } else if (refreshedDataset) {
+   state.currentRecord = refreshedDataset;
+   state.selectedRecord = refreshedDataset;
+   datasetPreviewPanel.render(refreshedDataset, { sheetId: state.selectedDatasetSheetId });
+  }
+  const { capabilities, adapterCapabilities, updates } = await loadOptionalManifestUiData({
+   loadCapabilities: () => api("/api/document/capabilities"),
+   loadAdapterCapabilities: () => apiGet("/api/adapter/capabilities"),
+   loadSourceUpdates: () => api("/api/workspace/detect-source-changes", {}),
+   onError: (name, error) => console.warn(`Optional workspace ${name} refresh failed:`, error)
+  });
   state.changedRecordIds = new Set((updates || []).filter((u) => u.changed).map((u) => u.id));
   state.missingRecordIds = new Set((updates || []).filter((u) => u.missing).map((u) => u.id));
   manifestPanel.renderManifest(manifest);
-  renderApiProfiles(manifest.apiProfiles ?? []);
-  renderFormatMatrix(capabilities);
- adapterCapabilitiesPanel.renderAdapterCapabilities(adapterCapabilities);
+  if (capabilities) renderFormatMatrix(capabilities);
+  if (adapterCapabilities) adapterCapabilitiesPanel.renderAdapterCapabilities(adapterCapabilities);
  return manifest;
  } catch (err) {
   console.error("Workspace refresh failed:", err);
@@ -851,6 +893,7 @@ async function runFirstWorkflow() {
  };
 }
 function clearMarkdownPreviewState({ clearRecord = true } = {}) {
+ datasetPreviewPanel.clear();
  if (clearRecord) {
   state.currentRecord = null;
   state.selectedRecord = null;
@@ -869,15 +912,23 @@ async function selectAndPrepareImportedRecord(record) {
  state.selectedRecord = selected;
  $("recordId").value = selected.id;
  showAlert("info", `Preparing preview for ${selected.title || selected.name || selected.id}...`);
- if (selected.kind === "dataset" || selected.sourceType === "csv" || selected.sourceType === "xlsx") {
-  const inspected = selected.autoInspectJob
+ if (selected.kind === "dataset" || ["csv", "xls", "xlsx"].includes(String(selected.sourceType || "").toLowerCase())) {
+  clearDatasetPreviewSelection();
+  const inspected = assertSuccessfulJob(selected.autoInspectJob
    ? selected.autoInspectJob
-   : await api("/api/dataset/inspect", { datasetId: selected.id });
-  await refreshManifest();
+   : await api("/api/dataset/inspect", { datasetId: selected.id }), "Dataset inspection failed.");
+  const manifest = await refreshManifest();
+  const readyDataset = findReadyDataset(manifest, selected.id);
+  state.currentRecord = readyDataset;
+  state.selectedRecord = readyDataset;
+  $("recordId").value = readyDataset.id;
   refreshInbox();
-  showAlert("success", `Table ready for filtering: ${selected.name || selected.id}`);
-  return { selected, inspected };
+  setActiveView("home");
+  await datasetPreviewPanel.revealDataset(readyDataset);
+  showAlert("success", `Table ready for filtering: ${readyDataset.name || readyDataset.id}`);
+  return { selected: readyDataset, inspected };
  }
+ datasetPreviewPanel.clear();
  setExtractionProgress(true, "Preparing AI-readable Markdown. Large PDFs can take a while; keep open.");
  await new Promise((resolve) => requestAnimationFrame(resolve));
  try {
@@ -1163,6 +1214,9 @@ async function chooseNativeSavePath({ inputId, defaultPath, filterName, extensio
    }
    return selected;
   }
+  if (window.__TAURI__ || window.__TAURI_INTERNALS__) {
+   throw error;
+  }
   const rawWebMsg = "Browser mode does not support native save dialogue. Type an output path in the input field.";
   const webMsg = (typeof window.translateText === "function") ? window.translateText(rawWebMsg) : rawWebMsg;
   showAlert("info", webMsg);
@@ -1194,6 +1248,43 @@ async function exportMarkdownToDestination(input) {
  if (!stagedPath) {
   throw new Error("The protected desktop export did not return a staged file path.");
  }
+ const finalPath = await tauriInvoke("finalize_authorized_export", {
+  workspacePath: state.workspacePath,
+  sourcePath: stagedPath,
+  destinationPath: requestedPath
+ });
+ return typeof stagedResult === "string"
+  ? finalPath
+  : { ...stagedResult, outputPath: finalPath };
+}
+async function exportSegmentedHtmlToDestination(input, onPhase = () => {}) {
+ const requestedPath = String(input.outputRelativePath || "").trim();
+ const workspaceOutputPath = isAbsoluteLocalPath(requestedPath) && isInsideCurrentWorkspace(requestedPath)
+  ? toCurrentWorkspaceRelative(requestedPath)
+  : requestedPath;
+ const requestBody = {
+  segmentRelativePaths: input.segmentRelativePaths,
+  outputRelativePath: workspaceOutputPath,
+  avoidOverwrite: !!input.avoidOverwrite,
+  title: input.title
+ };
+ if (!isAbsoluteLocalPath(requestedPath) || isInsideCurrentWorkspace(requestedPath)) {
+  onPhase("Streaming segments and images into HTML...");
+  return api("/api/markdown/export-segments-html", requestBody);
+ }
+ const stagedRelativePath = protectedExportStagePath("html", requestedPath);
+ onPhase("Streaming HTML into protected staging...");
+ const stagedResult = await api("/api/markdown/export-segments-html", {
+  ...requestBody,
+  outputRelativePath: stagedRelativePath
+ });
+ const stagedPath = typeof stagedResult === "string"
+  ? stagedResult
+  : stagedResult?.outputPath;
+ if (!stagedPath) {
+  throw new Error("The protected segmented HTML export did not return a staged file path.");
+ }
+ onPhase("Finalizing the streamed HTML file...");
  const finalPath = await tauriInvoke("finalize_authorized_export", {
   workspacePath: state.workspacePath,
   sourcePath: stagedPath,
@@ -1496,7 +1587,7 @@ async function exportCurrentNote(format, outputId) {
   return { cancelled: true };
  }
  const label = format === "docx" ? "Word" : (format === "html" ? "HTML" : (format === "pdf" ? "PDF" : "Markdown"));
- const statusContainer = $("exportStatusContainer");
+ const statusContainer = $("markdownExportStatusContainer");
  const statusText = $("exportStatusText");
  const fullPathText = $("exportFullPathText");
  const folderBtn = $("btnOpenExportFolder");
@@ -1598,30 +1689,33 @@ async function exportMergedNote(format) {
    outputInput.value = exportVal;
   }
   const label = format === "docx" ? "Word" : (format === "html" ? "HTML" : (format === "pdf" ? "PDF" : "Markdown"));
-  const selectedOutput = await chooseNativeSavePath({
-   inputId: outputId,
-   defaultPath: exportVal,
-   filterName: `${label} Document`,
-   extensions: [extension],
-   autoRename: true
-  });
-  if (!selectedOutput) return { cancelled: true };
-  const finalExportPath = $(outputId)?.value.trim() || selectedOutput;
-  const statusContainer = $("exportStatusContainer");
- const statusText = $("exportStatusText");
- const fullPathText = $("exportFullPathText");
- const folderBtn = $("btnOpenExportFolder");
- if (statusContainer) {
-  statusContainer.classList.remove("hidden");
-  statusText.textContent = `Merging segments...`;
-  statusText.style.color = "var(--primary)";
-  fullPathText.textContent = "";
-  folderBtn.style.display = "none";
- }
-  $("markdownStatus").textContent = `Merging and exporting all ${segmentsObj.segments.length} segments to ${finalExportPath}...`;
-  showAlert("info", `Merging all segments for ${label} export: ${finalExportPath}`);
- try {
-  const segments = segmentsObj.segments;
+   const exportStatus = createExportStatusController({
+    container: $("markdownExportStatusContainer"),
+    statusText: $("exportStatusText"),
+    pathText: $("exportFullPathText"),
+    folderButton: $("btnOpenExportFolder")
+   });
+  try {
+   const selectedOutput = await requestExportSavePath({
+    status: exportStatus,
+    selectPath: () => chooseNativeSavePath({
+     inputId: outputId,
+     defaultPath: exportVal,
+     filterName: `${label} Document`,
+     extensions: [extension],
+     autoRename: true
+    })
+   });
+   if (!selectedOutput) {
+    $("markdownStatus").textContent = `Merged ${label} export cancelled.`;
+    showAlert("info", `Merged ${label} export cancelled.`);
+    return { cancelled: true };
+   }
+   const finalExportPath = $(outputId)?.value.trim() || selectedOutput;
+   exportStatus.running("Merging segments...");
+   $("markdownStatus").textContent = `Merging and exporting all ${segmentsObj.segments.length} segments to ${finalExportPath}...`;
+   showAlert("info", `Merging all segments for ${label} export: ${finalExportPath}`);
+   const segments = segmentsObj.segments;
   const currentPath = normalizedWorkspaceRelativePath($("notePath").value.trim());
   const currentSegment = segments.find((segment) => normalizedWorkspaceRelativePath(segment.relativePath) === currentPath);
   if (currentSegment) {
@@ -1634,41 +1728,49 @@ async function exportMergedNote(format) {
    });
    markMarkdownClean(currentContent);
   }
-  let mergedContent = "";
-  for (let i = 0; i < segments.length; i++) {
-   if (statusText) {
-    statusText.textContent = `Reading segment ${i + 1}/${segments.length}...`;
-   }
-   const segPath = segments[i].relativePath;
-   const content = await api("/api/markdown/read", { relativePath: segPath });
-   mergedContent += stripGeneratedSegmentMetadata(content) + "\n\n";
-  }
-  // Relative image links in every segment are rooted in the segment folder.
-  const firstSegmentPath = normalizedWorkspaceRelativePath(segments[0]?.relativePath || "");
-  const segmentDirectory = firstSegmentPath.includes("/")
-   ? firstSegmentPath.slice(0, firstSegmentPath.lastIndexOf("/"))
-   : "notes";
-  const tempMdPath = temporaryMarkdownPath("merged-export", segmentDirectory);
   let result;
-  try {
-   await api("/api/markdown/save", {
-    relativePath: tempMdPath,
-    content: mergedContent
-   });
-   if (statusText) {
-    statusText.textContent = `Exporting merged ${label}...`;
-   }
-   result = await exportMarkdownToDestination({
-    relativePath: tempMdPath,
+  if (format === "html") {
+   result = await exportSegmentedHtmlToDestination({
+    segmentRelativePaths: segments.map((segment) => segment.relativePath),
     outputRelativePath: finalExportPath,
-    format,
-    avoidOverwrite: true
+    avoidOverwrite: true,
+    title: baseName
+   }, (phase) => {
+    exportStatus.running(phase);
+    $("markdownStatus").textContent = phase;
    });
-  } finally {
+  } else {
+   let mergedContent = "";
+   for (let i = 0; i < segments.length; i++) {
+    exportStatus.running(`Reading segment ${i + 1}/${segments.length}...`);
+    const segPath = segments[i].relativePath;
+    const content = await api("/api/markdown/read", { relativePath: segPath });
+    mergedContent += stripGeneratedSegmentMetadata(content) + "\n\n";
+   }
+   // Relative image links in every segment are rooted in the segment folder.
+   const firstSegmentPath = normalizedWorkspaceRelativePath(segments[0]?.relativePath || "");
+   const segmentDirectory = firstSegmentPath.includes("/")
+    ? firstSegmentPath.slice(0, firstSegmentPath.lastIndexOf("/"))
+    : "notes";
+   const tempMdPath = temporaryMarkdownPath("merged-export", segmentDirectory);
    try {
-    await api("/api/markdown/delete", { relativePath: tempMdPath });
-   } catch (e) {
-    console.warn("Failed to delete temporary merged markdown:", e);
+    await api("/api/markdown/save", {
+     relativePath: tempMdPath,
+     content: mergedContent
+    });
+    exportStatus.running(`Exporting merged ${label}...`);
+    result = await exportMarkdownToDestination({
+     relativePath: tempMdPath,
+     outputRelativePath: finalExportPath,
+     format,
+     avoidOverwrite: true
+    });
+   } finally {
+    try {
+     await api("/api/markdown/delete", { relativePath: tempMdPath });
+    } catch (e) {
+     console.warn("Failed to delete temporary merged markdown:", e);
+    }
    }
   }
    const exportedPath = typeof result === "string" ? result : result?.outputPath || finalExportPath;
@@ -1679,30 +1781,19 @@ async function exportMergedNote(format) {
   }
   $("markdownStatus").textContent = `Export complete: ${absolutePath}`;
   showAlert("success", `Merged export complete: ${absolutePath}`);
-  if (statusText) {
-   statusText.textContent = `completed`;
-   statusText.style.color = "#10b981";
-   fullPathText.textContent = absolutePath;
-   folderBtn.style.display = "inline-block";
-   folderBtn.onclick = async () => {
-    try {
-     await api("/api/document/open-folder", { folderPath: absolutePath });
-    } catch (err) {
-      showAlert("danger", `Failed to open folder: ${err.message}. Please manually open the path: ${absolutePath}`);
-    }
-   };
-  }
+   exportStatus.completed(absolutePath, async () => {
+     try {
+      await api("/api/document/open-folder", { folderPath: absolutePath });
+     } catch (err) {
+       showAlert("danger", `Failed to open folder: ${err.message}. Please manually open the path: ${absolutePath}`);
+     }
+   });
   return result;
  } catch (err) {
   const errorMsg = err.message || "Unknown merge export error";
   $("markdownStatus").textContent = `Merged export failed: ${errorMsg}`;
   showAlert("danger", `Merged export failed: ${errorMsg}`);
-  if (statusText) {
-   statusText.textContent = `failed`;
-   statusText.style.color = "#ef4444";
-   fullPathText.textContent = errorMsg;
-   folderBtn.style.display = "none";
-  }
+   exportStatus.failed(errorMsg);
   throw err;
  }
 }
@@ -1742,9 +1833,10 @@ async function loadMarkdownRelativePath(relativePath) {
  if (!confirmDiscardMarkdownChanges("open another Markdown file")) return { cancelled: true };
  const targetPath = String(relativePath || "").trim();
  if (!targetPath) throw new Error("Select a Markdown file path first.");
+ const content = await api("/api/markdown/read", { relativePath: targetPath });
+ clearDatasetPreviewSelection();
  $("notePath").value = targetPath;
  refreshMarkdownExportPaths(targetPath);
- const content = await api("/api/markdown/read", { relativePath: targetPath });
  $("noteContent").value = content;
  markMarkdownClean(content);
  renderMarkdownReadView();
@@ -1779,6 +1871,7 @@ async function handleOpenMarkdownFile() {
  $("sourcePath").value = selected;
  showAlert("info", "Opening Markdown file...");
  const content = await readExternalMarkdownFile(selected);
+ clearDatasetPreviewSelection();
  state.currentRecord = null;
  state.selectedRecord = null;
  $("recordId").value = "";
@@ -1967,7 +2060,15 @@ const manifestPanel = createManifestPanel({
  refreshTimeline,
  refreshVersions,
  rememberConversionAudit,
- showEditorWarningsForRecord
+ showEditorWarningsForRecord,
+ datasetPreviewPanel,
+ beforeDocumentSelected: () => confirmDiscardMarkdownChanges("open another document"),
+ onDocumentSelected: () => {
+  const selectedPath = $("notePath").value.trim();
+  refreshMarkdownExportPaths(selectedPath);
+  markMarkdownClean($("noteContent").value);
+  setActiveView("editor");
+ }
 });
 const documentFlowPanel = createDocumentFlowPanel({
  $,
@@ -2100,12 +2201,13 @@ clickRun("refreshManifest", refreshManifest);
  $("exportHtml").addEventListener("click", () => run(() => exportCurrentNote("html", "htmlExportPath")));
  $("exportMd")?.addEventListener("click", () => run(() => exportCurrentNote("md", "mdExportPath")));
  $("btnChooseMdExportPath")?.addEventListener("click", () => run(async () => {
-  return chooseNativeSavePath({
+  const selected = await chooseNativeSavePath({
    inputId: "mdExportPath",
    defaultPath: $("mdExportPath").value,
    filterName: "Markdown Document",
    extensions: ["md"]
   });
+  return selected || { cancelled: true };
  }));
   const toggleBtn = $("toggleEditorType");
   if (toggleBtn) {

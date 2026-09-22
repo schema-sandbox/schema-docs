@@ -73,7 +73,7 @@ sendGateImpact: "Missing adapter lowers conversion fidelity warnings but does no
 tesseract: optionalAdapter({
 name: "Tesseract OCR",
 command: "tesseract --version",
-detection: tesseract,
+detection: pdfOcr.tesseract,
 purpose: "Extracts OCR text from scanned PDF and image inputs.",
 fallback: "Core PDF extraction reads text layers only; scanned pages remain known limits until OCR is installed.",
 formats: ["pdf", "png", "jpg", "jpeg", "tiff"],

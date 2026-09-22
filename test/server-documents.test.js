@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { markdownToDocxBuffer } from "../src/adapters/markdownDocxExporter.js";
@@ -67,6 +67,34 @@ test("exports markdown to docx, pdf and html through API", async () => {
     assert.match(htmlContent, /<style>/i);
     assert.match(htmlContent, /<table/i);
     assert.match(htmlContent, /测试导出/i);
+  });
+});
+test("streams segmented Markdown to one HTML file through API", async () => {
+  await withServer(async (baseUrl) => {
+    const workspacePath = await mkdtemp(path.join(os.tmpdir(), "lft-server-segmented-html-"));
+    const segmentDir = path.join(workspacePath, "outputs", "readable");
+    const image = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/l4QW2QAAAABJRU5ErkJggg==", "base64");
+    await post(baseUrl, "/api/workspace/open", { workspacePath });
+    await mkdir(segmentDir, { recursive: true });
+    await writeFile(path.join(segmentDir, "visual.png"), image);
+    await writeFile(path.join(segmentDir, "part-001.md"), "# First\n\n![Visual](visual.png)\n");
+    await writeFile(path.join(segmentDir, "part-002.md"), "## Second\n\n| A | B |\n| --- | --- |\n| $x^2$ | 2 |\n");
+    const exported = await post(baseUrl, "/api/markdown/export-segments-html", {
+      workspacePath,
+      segmentRelativePaths: ["outputs/readable/part-001.md", "outputs/readable/part-002.md"],
+      outputRelativePath: "exports/complete.html",
+      avoidOverwrite: true,
+      title: "Complete API export"
+    });
+    assert.equal(exported.ok, true);
+    assert.equal(exported.data.segmentCount, 2);
+    assert.equal(exported.data.imageOccurrences, 1);
+    assert.match(exported.data.outputPath, /complete\.html$/);
+    const html = await readFile(exported.data.outputPath, "utf8");
+    assert.match(html, /<title>Complete API export<\/title>/);
+    assert.match(html, /data:image\/png;base64,/);
+    assert.match(html, /<table>/);
+    assert.match(html, /class="katex-inline-math"/);
   });
 });
 test("exports imported document to target format through API", async () => {

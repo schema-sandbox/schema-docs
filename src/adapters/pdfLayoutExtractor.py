@@ -1,10 +1,13 @@
 ﻿import argparse
 import copy
+import math
 import hashlib
 import json
+import os
 import re
 import statistics
 import sys
+import time
 from pathlib import Path
 
 try:
@@ -62,7 +65,7 @@ MATH_FONT = re.compile(
 )
 MATH_SIGNAL = re.compile(r"[=+\-*/^_<>\u00b1\u00d7\u00f7\u2200-\u22ff\u0370-\u03ff]")
 BROKEN_FORMULA = re.compile(r"(?:\(cid:\d+\)|\\[0-7]{3})")
-FIGURE_CAPTION = re.compile(r"\bFig(?:ure)?\.?\s*\d+(?:[-\u2013]\d+)+", re.IGNORECASE)
+FIGURE_CAPTION = re.compile(r"\bFig(?:ure)?\.?\s*\d+(?:\s*(?:[.\-\u2013]\s*)?\d+)+", re.IGNORECASE)
 
 
 def formula_requires_visual_fallback(source_text, latex=""):
@@ -191,6 +194,11 @@ def reattach_inline_operator_baselines(page):
 
     for operator in chars:
         if not MATH_FONT.search(str(operator.get("fontname", ""))):
+            continue
+        # Extensible delimiter caps belong to the displayed equation. Moving
+        # them to a prose baseline makes the formula bbox swallow neighbouring
+        # words and drops the visible opening/closing parenthesis.
+        if is_extension_delimiter(operator):
             continue
         raw_text = str(operator.get("text", ""))
         token = latex_char(operator).strip()
@@ -458,6 +466,21 @@ def reconstruct_formula_latex(components):
                 rows.append(row)
             row["chars"].append(char)
         if len(rows) < 2:
+            return ""
+        delimiter_height = max(
+            float(char.get("bottom", 0)) - float(char.get("top", 0))
+            for char in (*left_fences, *right_fences)
+        )
+        row_centres = [row["center"] for row in rows]
+        row_span = max(row_centres) - min(row_centres)
+        # Parentheses around a two-line fraction are short caps, not a fenced
+        # matrix. Require the delimiter glyph to span the row separation before
+        # treating the interior as a pmatrix.
+        largest_row_size = max(
+            float(char.get("size", 0) or 0)
+            for row in rows for char in row["chars"]
+        )
+        if delimiter_height < row_span + max(1.0, largest_row_size * 0.35):
             return ""
 
         def row_latex(row):
@@ -1041,7 +1064,17 @@ def merge_complex_formula_regions(regions, page=None):
             entry.get("editableMathCandidate")
             or entry.get("needsVisualFallback")
             or entry.get("displayMathLine")
+            or entry.get("displayFragment")
             for entry in previous_group
+        )
+        previous_delimiter_only = all(
+            is_extension_delimiter(char)
+            for entry in previous_group
+            for char in entry.get("_chars", [])
+        )
+        current_delimiter_only = all(
+            is_extension_delimiter(char)
+            for char in region.get("_chars", [])
         )
         damaged_stack = region.get("needsVisualFallback") or any(entry.get("needsVisualFallback") for entry in previous_group)
         display_stack = (
@@ -1062,7 +1095,7 @@ def merge_complex_formula_regions(regions, page=None):
             and central_combined
             and (horizontal_near or display_stack)
             and -12.0 <= vertical_gap <= maximum_gap
-            and not prose_boundary
+            and (not prose_boundary or previous_delimiter_only or current_delimiter_only)
         ):
             previous_group.append(region)
         else:
@@ -1093,7 +1126,10 @@ def merge_complex_formula_regions(regions, page=None):
                     round(float(char.get("top", 0)), 3),
                     str(char.get("text", "")),
                 )
-                if key in existing or latex_char(char).strip() not in {r"\prod", r"\sum", r"\int"}:
+                if key in existing or (
+                    latex_char(char).strip() not in {r"\prod", r"\sum", r"\int"}
+                    and not is_extension_delimiter(char)
+                ):
                     continue
                 center_x = (float(char.get("x0", 0)) + float(char.get("x1", 0))) / 2.0
                 center_y = (float(char.get("top", 0)) + float(char.get("bottom", 0))) / 2.0
@@ -1199,20 +1235,151 @@ def merge_complex_formula_regions(regions, page=None):
 
 
 def image_regions(page, page_number):
+    """Return meaningful raster placements, excluding PDF image fragments.
+
+    Some PDFs (especially books produced by a print/imposition pipeline) store
+    every glyph or mask fragment as an individual image XObject.  pdfplumber
+    exposes those fragments through ``page.images``.  Treating that list as a
+    one-to-one list of user-visible figures creates thousands of overlapping
+    regions on a single page (and renders the same crop thousands of times).
+    Keep a stable, quantised placement key and ignore sub-point fragments;
+    those are not useful document images and are already represented by the
+    native text layer or the surrounding page image.
+    """
     regions = []
+    seen = set()
+    # A one point quantisation collapses repeated placements that differ only
+    # by the PDF renderer's sub-point rounding noise while retaining separate
+    # panels and ordinary illustrations.
+    quantisation = 1.0
+    min_dimension = 1.5
+    # A few producers emit only a few dozen glyph-mask placements for a
+    # figure.  Keep the threshold low enough to collapse that same fragment
+    # stream before OCR sees each child image, while still leaving ordinary
+    # pages with a small number of independent illustrations untouched.
+    max_regions = 32
+    page_width = max(1.0, float(getattr(page, "width", 0) or 0))
+    page_height = max(1.0, float(getattr(page, "height", 0) or 0))
+    # pdfplumber keeps image coordinates in the page's physical coordinate
+    # system.  Cropped pages and PDFs with a translated MediaBox therefore do
+    # not necessarily start at (0, 0).  Keep the origin while clipping so a
+    # valid image at a negative/positive translated origin is not discarded.
+    try:
+        page_origin_x = float(page.bbox[0])
+        page_origin_y = float(page.bbox[1])
+    except (AttributeError, TypeError, IndexError, ValueError):
+        page_origin_x = 0.0
+        page_origin_y = 0.0
+    page_right = page_origin_x + page_width
+    page_bottom = page_origin_y + page_height
+    candidates = []
     for image in page.images:
-        regions.append({
-            "type": "image",
-            "subtype": "raster",
-            "page": page_number,
-            "bbox": [
+        try:
+            bbox = [
                 round(float(image.get("x0", 0)), 2),
                 round(float(image.get("top", 0)), 2),
                 round(float(image.get("x1", 0)), 2),
                 round(float(image.get("bottom", 0)), 2),
-            ],
+            ]
+        except (TypeError, ValueError):
+            continue
+        width = bbox[2] - bbox[0]
+        height = bbox[3] - bbox[1]
+        if width <= 0 or height <= 0 or min(width, height) < min_dimension:
+            continue
+        # A few imposition PDFs expose image XObjects in the source spread
+        # coordinate system while pdfplumber renders the cropped page in its
+        # local coordinate system.  Such boxes are wholly outside the page and
+        # would otherwise reach render_visual_regions and become empty crops.
+        if bbox[2] <= page_origin_x or bbox[0] >= page_right or bbox[3] <= page_origin_y or bbox[1] >= page_bottom:
+            continue
+        bbox[0] = max(page_origin_x, bbox[0])
+        bbox[1] = max(page_origin_y, bbox[1])
+        bbox[2] = min(page_right, bbox[2])
+        bbox[3] = min(page_bottom, bbox[3])
+        width = bbox[2] - bbox[0]
+        height = bbox[3] - bbox[1]
+        if width <= 0 or height <= 0 or min(width, height) < min_dimension:
+            continue
+        key = tuple(round(value / quantisation) for value in bbox)
+        if key in seen:
+            continue
+        seen.add(key)
+        stream = image.get("stream")
+        source_object = image.get("object_id", image.get("id", ""))
+        if not source_object and stream is not None:
+            source_object = getattr(stream, "objid", getattr(stream, "obj_id", ""))
+        candidates.append({
+            "area": width * height,
+            "bbox": bbox,
+            "name": str(image.get("name", "")),
+            "sourceObject": str(source_object or ""),
+        })
+
+    # A page with hundreds of distinct placements is itself evidence that the
+    # PDF is using image fragments (glyph masks, sprites, or tiled scans), not
+    # hundreds of independent user-visible figures.  Merge those fragments
+    # into one composite crop so the visual evidence is retained while the
+    # renderer performs one bounded page render.
+    fragment_like = False
+    if len(candidates) > max_regions:
+        widths = sorted(item["bbox"][2] - item["bbox"][0] for item in candidates)
+        heights = sorted(item["bbox"][3] - item["bbox"][1] for item in candidates)
+        median_width = widths[len(widths) // 2]
+        median_height = heights[len(heights) // 2]
+        boxes = [item["bbox"] for item in candidates]
+        composite = union_bbox(boxes)
+        page_width = float(getattr(page, "width", composite[2]))
+        page_height = float(getattr(page, "height", composite[3]))
+        union_area = max(1.0, (composite[2] - composite[0]) * (composite[3] - composite[1]))
+        coverage = sum(item["area"] for item in candidates) / union_area
+        # A large count of tiny placements with low coverage is the signature
+        # of a mask/glyph/tile stream.  Some producers emit the same fragments
+        # repeatedly, so the union can also be mostly covered by overlapping
+        # placements (coverage >= 0.65).  Treat that as the same
+        # fragment stream when it occupies a bounded part of the page.  The
+        # latter guard keeps a genuinely tiled full-page scan from being
+        # mistaken for a single small figure.
+        page_area = max(1.0, page_width * page_height)
+        union_fraction = union_area / page_area
+        fragment_like = (
+            median_width <= 20
+            and median_height <= 20
+            and (
+                coverage < 0.5
+                or (coverage >= 0.65 and union_fraction < 0.65)
+            )
+        )
+        if fragment_like:
+            source_objects = [item.get("sourceObject", "") for item in candidates if item.get("sourceObject")]
+            source_objects = list(dict.fromkeys(source_objects))
+            candidates = [{"area": sum(item["area"] for item in candidates), "bbox": [
+            max(page_origin_x, composite[0]), max(page_origin_y, composite[1]),
+            min(page_right, composite[2]), min(page_bottom, composite[3]),
+            ], "name": "", "sourceObject": source_objects[0] if len(source_objects) == 1 else "",
+            "sourceObjects": source_objects[:32], "sourcePlacementCount": len(boxes),
+            "preserveSourceText": True, "doNotExcludeTables": True,
+            "reductionReason": "dense_small_image_fragments"}]
+    # Preserve the largest visual placements when a page has a manageable
+    # number of independent images. Sorting is deterministic.
+    candidates.sort(key=lambda item: (-item["area"], item["bbox"]))
+    for item in candidates:
+        bbox = item["bbox"]
+        regions.append({
+            "type": "image",
+            "subtype": "raster",
+            "page": page_number,
+            "bbox": bbox,
             "confidence": "high",
             "needsVisualFallback": True,
+            "sourcePlacementCount": int(item.get("sourcePlacementCount", 1)),
+            "sourceObject": item.get("sourceObject", ""),
+            "sourceObjects": item.get("sourceObjects", [item.get("sourceObject", "")] if item.get("sourceObject", "") else []),
+            "sourceObjectCount": len(item.get("sourceObjects", [item.get("sourceObject", "")] if item.get("sourceObject", "") else [])),
+            "sourceObjectScope": "page_image_placement" if item.get("sourceObject") or item.get("sourceObjects") else "",
+            "preserveSourceText": bool(item.get("preserveSourceText")),
+            "doNotExcludeTables": bool(item.get("doNotExcludeTables")),
+            "reductionReason": item.get("reductionReason", ""),
         })
     return regions
 
@@ -1230,6 +1397,108 @@ def object_bbox(item):
         return [x0, top, x1, bottom]
     except Exception:
         return None
+
+
+# pdfminer becomes disproportionately slow before it reaches the old
+# pathological-page limit. On real material, pages with 3.6k-18k vector
+# objects spent 4-11 seconds just materializing ``page.chars`` while the
+# PDFium text facade completes the same layout in well under a second. Keep a
+# full source-page visual fallback for this wider performance boundary so the
+# optimization does not hide vector geometry or turn it into a cropped guess.
+VECTOR_PRIMITIVE_BUDGET = 4_000
+
+
+def release_pathological_vector_objects(page):
+    """Drop unbounded vector geometry after recording its count.
+
+    pdfplumber parses all page objects together.  A page with tens of
+    thousands of decorative paths can therefore retain hundreds of MB even
+    when the final layout only needs text and a source-page crop.  Keep the
+    count as evidence, release the path lists, and let figure/table detection
+    use its explicit coarse fallback.
+    """
+    preflight_count = int(getattr(page, "_schema_docs_pdfium_object_count", 0) or 0)
+    if preflight_count > VECTOR_PRIMITIVE_BUDGET:
+        setattr(page, "_schema_docs_vector_primitive_count", preflight_count)
+    objects = getattr(page, "objects", None)
+    if not isinstance(objects, dict):
+        return 0
+    count = sum(len(objects.get(key, []) or []) for key in ("line", "curve", "rect"))
+    count = max(count, preflight_count)
+    if count > VECTOR_PRIMITIVE_BUDGET:
+        setattr(page, "_schema_docs_vector_primitive_count", count)
+        for key in ("line", "curve", "rect"):
+            objects[key] = []
+    return count
+
+
+def use_text_image_layout_for_pathological_page(page):
+    """Build pdfminer layout without retaining pathological vector paths."""
+    if getattr(page, "_schema_docs_text_image_page", False):
+        return False
+    object_count = int(getattr(page, "_schema_docs_pdfium_object_count", 0) or 0)
+    if object_count <= VECTOR_PRIMITIVE_BUDGET or hasattr(page, "_schema_docs_text_only_layout"):
+        return False
+    from pdfminer.pdfinterp import PDFPageInterpreter
+    from pdfplumber.page import PDFPageAggregatorWithMarkedContent
+
+    class TextImageAggregator(PDFPageAggregatorWithMarkedContent):
+        def paint_path(self, *args, **kwargs):
+            # Text and image objects remain available; vector paths are
+            # represented by the source-page visual fallback instead.
+            return None
+
+    class TextImageInterpreter(PDFPageInterpreter):
+        # Do not construct pdfminer Path objects for pathological vector
+        # pages.  The default interpreter accumulates every m/l/c/re path
+        # before calling paint_path, which is still quadratic in memory and
+        # takes minutes on pages with 100k+ decorative primitives.  These
+        # operators have no effect on text or raster image extraction; the
+        # page image fallback preserves their visual content.
+        def _skip_path_operator(self, *args, **kwargs):
+            return None
+
+        do_m = _skip_path_operator
+        do_l = _skip_path_operator
+        do_c = _skip_path_operator
+        do_v = _skip_path_operator
+        do_y = _skip_path_operator
+        do_h = _skip_path_operator
+        do_re = _skip_path_operator
+        do_S = _skip_path_operator
+        do_s = _skip_path_operator
+        do_f = _skip_path_operator
+        do_F = _skip_path_operator
+        do_f_a = _skip_path_operator
+        do_b = _skip_path_operator
+        do_B = _skip_path_operator
+        do_b_a = _skip_path_operator
+        do_B_a = _skip_path_operator
+        do_n = _skip_path_operator
+        do_W = _skip_path_operator
+        do_W_a = _skip_path_operator
+
+    device = TextImageAggregator(page.pdf.rsrcmgr, pageno=page.page_number, laparams=page.pdf.laparams)
+    interpreter = TextImageInterpreter(page.pdf.rsrcmgr, device)
+    interpreter.process_page(page.page_obj)
+    page._layout = device.get_result()
+    page._schema_docs_text_only_layout = True
+    return True
+
+
+def vector_primitive_count(page):
+    recorded = int(getattr(page, "_schema_docs_vector_primitive_count", 0) or 0)
+    if recorded:
+        return recorded
+    return sum(len(getattr(page, name, []) or []) for name in ("lines", "curves", "rects"))
+
+
+def needs_source_page_visual_fallback(page):
+    """Whether geometry or image-fragment density makes a full source crop safer."""
+    return (
+        vector_primitive_count(page) > VECTOR_PRIMITIVE_BUDGET
+        or bool(getattr(page, "_schema_docs_performance_fallback", False))
+    )
 
 
 def union_bbox(boxes):
@@ -1260,6 +1529,55 @@ def bbox_overlap_ratio(first, second):
     intersection = (right - left) * (bottom - top)
     first_area = max(1.0, (float(first[2]) - float(first[0])) * (float(first[3]) - float(first[1])))
     return intersection / first_area
+
+
+def exclude_ocr_regions_covered_by_visual_fallback(ocr_regions, images):
+    """Keep OCR candidates that are not already covered by a complete figure.
+
+    Complex figures can contain dozens of tiny raster placements.  Once the
+    layout has a complete source-linked figure fallback, retrying each child
+    placement as four-direction OCR is both wasteful and misleading: the
+    child often contains only a line, icon, or antialiased fragment.  Keep the
+    exclusion explicit so the page ledger can distinguish visual preservation
+    from a failed OCR attempt.
+    """
+    fallbacks = [
+        image for image in (images or [])
+        if image.get("type") == "image"
+        and image.get("needsVisualFallback")
+        and isinstance(image.get("bbox"), (list, tuple))
+        and len(image["bbox"]) == 4
+    ]
+    if not fallbacks:
+        return list(ocr_regions or []), []
+    retained = []
+    excluded = []
+    for region in ocr_regions or []:
+        bbox = region.get("bbox")
+        covered = bool(
+            isinstance(bbox, (list, tuple))
+            and len(bbox) == 4
+            and any(bbox_overlap_ratio(bbox, fallback["bbox"]) >= 0.98 for fallback in fallbacks)
+        )
+        # A visual fallback proves that pixels were preserved; it does not
+        # prove that the covered crop contains no text. Only an explicit
+        # independent non-text decision may remove an OCR candidate.
+        if covered and (region.get("provenNonText") or region.get("ocrExclusionApproved")):
+            excluded.append({
+                **region,
+                "status": "non_text",
+                "reason": "visual_fallback",
+            })
+        else:
+            fallback = next((item for item in fallbacks if bbox_overlap_ratio(bbox, item["bbox"]) >= 0.98), None) if covered else None
+            fallback_ready = bool(fallback and fallback.get("assetStatus") in {"rendered", "reused"})
+            retained.append({**region, **({
+                "visualFallbackCandidate": True,
+                "visualFallbackCoverage": fallback_ready,
+                "visualFallbackKind": "dense_fragment" if fallback and fallback.get("reductionReason") == "dense_small_image_fragments" else "figure",
+                "visualFallbackSourcePlacementCount": int(fallback.get("sourcePlacementCount", 0) or 0) if fallback else 0,
+            } if covered else {})})
+    return retained, excluded
 
 
 def prose_boundary_before_caption(lines, caption_top, body_size, page_width):
@@ -1294,6 +1612,15 @@ def prose_boundary_before_caption(lines, caption_top, body_size, page_width):
 
 def figure_regions(page, page_number):
     """Map vector figures that PDF image-object enumeration misses."""
+    if needs_source_page_visual_fallback(page):
+        # Unknown geometry cannot justify a smaller crop. This image is a
+        # source reference, never an exclusion mask for text or structures.
+        return [{"type": "image", "subtype": "source_page", "page": page_number,
+                 "bbox": list(page.bbox), "confidence": "low",
+                 "needsVisualFallback": True, "preserveSourceText": True,
+                 "doNotExcludeTables": True, "reductionReason": "vector_primitive_budget",
+                 "sourcePrimitiveCount": vector_primitive_count(page),
+                 "reviewReason": "complex_geometry_preserved_as_source_page"}]
     try:
         words = page.extract_words(
             use_text_flow=True,
@@ -1314,10 +1641,17 @@ def figure_regions(page, page_number):
     regions = []
     page_sizes = [float(word.get("size", 0)) for word in words if float(word.get("size", 0)) > 0]
     body_size = statistics.median(page_sizes) if page_sizes else 0.0
+    # Some textbooks encode a page drawing as tens of thousands of tiny line
+    # and curve primitives.  The old connected-component pass became O(n²)
+    # for those pages and could hold a gigabyte of geometry while appearing
+    # stalled.  Keep a coarse, source-linked visual fallback for the caption
+    # band instead of enumerating an unbounded primitive graph.
+    primitive_count = vector_primitive_count(page)
+    primitive_budget = VECTOR_PRIMITIVE_BUDGET
     for line in lines:
         ordered = sorted(line["words"], key=lambda item: float(item.get("x0", 0)))
         caption = " ".join(str(item.get("text", "")) for item in ordered).strip()
-        if not re.match(r"^\s*Fig(?:ure)?\.?\s*\d+(?:[-\u2013]\d+)+", caption, re.IGNORECASE):
+        if not FIGURE_CAPTION.match(caption):
             continue
         caption_top = min(float(item.get("top", 0)) for item in ordered)
         caption_bottom = max(float(item.get("bottom", caption_top)) for item in ordered)
@@ -1351,7 +1685,7 @@ def figure_regions(page, page_number):
                 continue
             previous_words = sorted(previous_line["words"], key=lambda item: float(item.get("x0", 0)))
             previous_text = " ".join(str(item.get("text", "")) for item in previous_words).strip()
-            if re.match(r"^\s*Fig(?:ure)?\.?\s*\d+(?:[-\u2013]\d+)+", previous_text, re.IGNORECASE):
+            if FIGURE_CAPTION.match(previous_text):
                 previous_caption_bottom = max(
                     previous_caption_bottom,
                     max(float(item.get("bottom", 0)) for item in previous_words),
@@ -1363,6 +1697,23 @@ def figure_regions(page, page_number):
             previous_caption_bottom + 6.0,
             prose_boundary + 4.0,
         )
+        if primitive_count > primitive_budget:
+            fallback_top = max(0.0, figure_top_limit)
+            fallback_bottom = max(fallback_top, caption_top - 2.0)
+            regions.append({
+                "type": "image",
+                "subtype": "figure",
+                "page": page_number,
+                "bbox": [0.0, fallback_top, float(page.width), fallback_bottom],
+                "contentBbox": [0.0, fallback_top, float(page.width), fallback_bottom],
+                "caption": caption[:500],
+                "confidence": "low",
+                "needsVisualFallback": True,
+                "doNotExcludeTables": True,
+                "reductionReason": "vector_primitive_budget",
+                "sourcePrimitiveCount": primitive_count,
+            })
+            continue
         primitive_boxes = []
         for primitive in list(page.lines) + list(page.curves) + list(page.rects):
             box = object_bbox(primitive)
@@ -1467,8 +1818,10 @@ def normalized_table_cells(rows):
 
 
 def table_region_from_object(table, page_number, detection="ruled"):
+    from pdfReadingOrder import source_table_grid
     rows = table.extract() or []
-    cells = normalized_table_cells(rows)
+    grid = source_table_grid(table, rows)
+    cells = grid["rows"] if grid else normalized_table_cells(rows)
     nonempty = sum(1 for row in cells for cell in row if str(cell).strip())
     if len(cells) < 2 or nonempty < 2:
         return None
@@ -1487,6 +1840,8 @@ def table_region_from_object(table, page_number, detection="ruled"):
         "page": page_number,
         "bbox": [round(float(value), 2) for value in table.bbox],
         "rows": cells,
+        "spans": grid["spans"] if grid else [],
+        "cellBoxes": grid["cellBoxes"] if grid else [],
         "rowCount": len(cells),
         "columnCount": max((len(row) for row in cells), default=0),
         "detection": detection,
@@ -1546,13 +1901,14 @@ def captioned_visual_table_region(page, page_number):
     }
 
 
-def table_regions(page, page_number, excluded_regions=None, formula_candidates=None):
+def ruled_table_regions(page, page_number, excluded_regions=None, formula_candidates=None):
     page_text = page.extract_text(x_tolerance=2, y_tolerance=3) or ""
     has_table_caption = bool(re.search(r"\bTable\s+\d+(?:[-\u2013]\d+)*\b", page_text, re.IGNORECASE))
     if len(page.lines) + len(page.rects) < 4 and not has_table_caption:
         return []
     try:
-        tables = page.find_tables()
+        from pdfTableStructure import visible_table_objects
+        tables = visible_table_objects(page)
     except Exception:
         tables = []
     regions = []
@@ -1560,7 +1916,7 @@ def table_regions(page, page_number, excluded_regions=None, formula_candidates=N
         table_box = [float(value) for value in table.bbox]
         if any(
             bbox_overlap_ratio(table_box, region.get("contentBbox") or region.get("bbox")) >= 0.3
-            for region in (excluded_regions or [])
+            for region in (excluded_regions or []) if not region.get("doNotExcludeTables")
         ):
             continue
         region = table_region_from_object(table, page_number)
@@ -1618,10 +1974,6 @@ def table_regions(page, page_number, excluded_regions=None, formula_candidates=N
                 continue
             regions = [entry for entry in regions if entry not in overlapping]
             regions.append(candidate)
-        if not regions:
-            visual_table = captioned_visual_table_region(page, page_number)
-            if visual_table:
-                regions.append(visual_table)
     # Nested ruling lines can make pdfplumber report a second table wholly
     # inside the real one. Keep the richer candidate instead of emitting both.
     ranked = sorted(
@@ -1640,26 +1992,31 @@ def table_regions(page, page_number, excluded_regions=None, formula_candidates=N
     return sorted(deduplicated, key=lambda entry: (entry["bbox"][1], entry["bbox"][0]))
 
 
-def extract_page_text(page, excluded_regions=None):
-    excluded_boxes = [
-        region.get("contentBbox")
-        for region in (excluded_regions or [])
-        if region.get("contentBbox")
-    ]
-    if excluded_boxes:
-        def keep_object(item):
-            if item.get("object_type") != "char":
-                return True
-            center_x = (float(item.get("x0", 0)) + float(item.get("x1", 0))) / 2.0
-            center_y = (float(item.get("top", 0)) + float(item.get("bottom", 0))) / 2.0
-            return not any(
-                float(box[0]) <= center_x <= float(box[2])
-                and float(box[1]) <= center_y <= float(box[3])
-                for box in excluded_boxes
-            )
+def table_regions(page, page_number, excluded_regions=None, formula_candidates=None):
+    from pdfTableStructure import borderless_table_regions
+    primitive_count = vector_primitive_count(page)
+    if needs_source_page_visual_fallback(page):
+        # The ruled-table detector also walks every line/curve and can recreate
+        # the same pathological O(n²) cost as vector-figure grouping.  Keep a
+        # captioned visual table fallback when evidence exists; otherwise let
+        # the source-linked figure fallback carry the page without pretending
+        # that a cell grid was recovered.
+        fallback = captioned_visual_table_region(page, page_number)
+        return [fallback] if fallback else []
+    native = ruled_table_regions(page, page_number, excluded_regions, formula_candidates)
+    protected = [r.get("contentBbox") or r.get("bbox") for r in native + list(excluded_regions or [])
+                 if not r.get("doNotExcludeTables")]
+    inferred = borderless_table_regions(page, page_number, protected)
+    regions = native + inferred
+    if not regions and re.search(r"\bTable\s+\d+", page.extract_text(x_tolerance=2, y_tolerance=3) or "", re.IGNORECASE):
+        fallback = captioned_visual_table_region(page, page_number)
+        if fallback: regions.append(fallback)
+    return sorted(regions, key=lambda r: (r["bbox"][1], r["bbox"][0]))
 
-        page = page.filter(keep_object)
-    return page.extract_text(layout=True, x_tolerance=2, y_tolerance=3) or ""
+
+def extract_page_text(page, excluded_regions=None, flow=None):
+    from pdfReadingOrder import extract_page_text as ordered_text
+    return ordered_text(page, excluded_regions, flow)
 
 
 def inject_formula_fallback_markers(page, formulas, page_number):
@@ -1792,6 +2149,18 @@ def rejoin_operator_only_lines(lines):
         merged.append(line)
     return merged
 
+def rejoin_wrapped_prose_lines(lines):
+    s, m = re.compile(r"^(?:#|[-*+]|\d|>|```|\$\$|<!--|\|)"), []
+    for raw in lines:
+        line = str(raw or "").rstrip(); stripped = line.strip()
+        prev = m[-1] if m else ""
+        if (not line or not prev or s.match(stripped) or s.match(prev)
+                or re.search(r"[.!?;:)\]\"']$", prev)):
+            m.append(line)
+        else:
+            m[-1] = f"{prev[:-1] if prev.endswith('-') else prev + ' '}{stripped}"
+    return m
+
 
 def enrich_text_with_math(text, formulas, page_number):
     """Replace intact formula-only lines with editable Markdown math blocks."""
@@ -1908,6 +2277,7 @@ def enrich_text_with_math(text, formulas, page_number):
         else:
             output.append(raw_line.rstrip())
     output = rejoin_operator_only_lines(output)
+    output = rejoin_wrapped_prose_lines(output)
     enriched = "\n".join(output).strip()
 
     def blackboard_membership(match):
@@ -1952,6 +2322,9 @@ def markdown_table(region):
         "| " + " | ".join(["---"] * width) + " |",
     ]
     lines.extend("| " + " | ".join(row) + " |" for row in normalized[1:])
+    if region.get("spans"):
+        meta = {"v":1,"rows":len(normalized),"cols":width,"spans":region["spans"]}
+        lines.insert(0, "<!-- schema-table: " + json.dumps(meta, separators=(",", ":")) + " -->")
     return "\n".join(lines)
 
 
@@ -1985,22 +2358,25 @@ def render_visual_regions(page, page_number, regions, asset_dir, allow_reuse=Fal
     if not pending:
         return
     try:
-        page_image = page.to_image(resolution=resolution, antialias=True).original
+        resolution = min(resolution, 72.0 * (16_000_000 / max(1.0, float(page.width) * float(page.height))) ** .5)
+        rendered_page = page.to_image(resolution=resolution, antialias=True)
+        page_image = rendered_page.original
     except Exception as error:
         for region in regions:
             region["assetStatus"] = "failed"
             region["assetError"] = str(error)
         return
-    scale = float(resolution) / 72.0
+    scale = rendered_page.scale
+    origin_x, origin_y = rendered_page.bbox[:2]
     for index, region, kind, file_name, target in pending:
         try:
             x0, top, x1, bottom = [float(value) for value in region["bbox"]]
             padding = 3 if region.get("type") == "formula" else 0
             crop = (
-                max(0, int(x0 * scale) - padding),
-                max(0, int(top * scale) - padding),
-                min(page_image.width, int(x1 * scale) + padding),
-                min(page_image.height, int(bottom * scale) + padding),
+                max(0, math.floor((x0 - origin_x) * scale) - padding),
+                max(0, math.floor((top - origin_y) * scale) - padding),
+                min(page_image.width, math.ceil((x1 - origin_x) * scale) + padding),
+                min(page_image.height, math.ceil((bottom - origin_y) * scale) + padding),
             )
             if crop[2] <= crop[0] or crop[3] <= crop[1]:
                 raise ValueError("empty visual crop")
@@ -2012,13 +2388,184 @@ def render_visual_regions(page, page_number, regions, asset_dir, allow_reuse=Fal
             region["assetError"] = str(error)
 
 
-def main():
-    try:
-        import pdfplumber
-    except ImportError:
-        print("pdfplumber is not installed", file=sys.stderr)
-        sys.exit(3)
+def extract_layout_page(page, page_number, asset_dir):
+    from pdfLayoutSession import preserve_unknown_glyphs
+    from pdfReadingOrder import column_flow, inject_image_markers, paragraph_edges, bind_paragraph_edges, separate_margin_lines, isolate_sidebars
+    from pdfRegionOcr import select_regions
+    markdown_lines = []
+    timing_started = time.perf_counter()
+    timings = {}
+    stage_started = time.perf_counter()
+    used_text_image_layout = use_text_image_layout_for_pathological_page(page)
+    timings["pathologicalLayoutMs"] = round((time.perf_counter() - stage_started) * 1000, 3)
+    stage_started = time.perf_counter()
+    source_text_count = sum(len(str(char.get("text", "")).strip()) for char in page.chars)
+    timings["sourceTextAccessMs"] = round((time.perf_counter() - stage_started) * 1000, 3)
+    stage_started = time.perf_counter()
+    ocr_regions = select_regions(page)
+    candidate_ledger = list(getattr(page, "_schema_docs_ocr_candidate_ledger", []) or [])
+    timings["ocrRegionSelectionMs"] = round((time.perf_counter() - stage_started) * 1000, 3)
+    stage_started = time.perf_counter()
+    repaired_cid_artifacts = repair_known_cid_chars(page)
+    repaired_math_glyphs = repair_tex_font_ascii_chars(page)
+    timings["textRepairMs"] = round((time.perf_counter() - stage_started) * 1000, 3)
+    stage_started = time.perf_counter()
+    reattach_inline_operator_baselines(page)
+    inline_operators = inline_large_operator_regions(page, page_number)
+    timings["inlineOperatorMs"] = round((time.perf_counter() - stage_started) * 1000, 3)
+    inline_operator_keys = {
+        char_position_key(char)
+        for formula in inline_operators
+        for char in formula.get("_chars", [])
+    }
+    object_started = time.perf_counter()
+    stage_started = object_started
+    formulas = merge_complex_formula_regions(
+        formula_regions(page, page_number, inline_operator_keys),
+        page,
+    ) + inline_operators
+    formulas.sort(key=lambda formula: (
+        float(formula["bbox"][1]),
+        float(formula["bbox"][0]),
+    ))
+    timings["formulaDetectionMs"] = round((time.perf_counter() - stage_started) * 1000, 3)
+    stage_started = time.perf_counter()
+    vector_primitive_total = release_pathological_vector_objects(page)
+    timings["vectorObjectReleaseMs"] = round((time.perf_counter() - stage_started) * 1000, 3)
+    stage_started = time.perf_counter()
+    raster_images = [] if getattr(page, "_schema_docs_text_image_page", False) else image_regions(page, page_number)
+    timings["rasterImageDetectionMs"] = round((time.perf_counter() - stage_started) * 1000, 3)
+    stage_started = time.perf_counter()
+    vector_figures = figure_regions(page, page_number)
+    timings["vectorFigureDetectionMs"] = round((time.perf_counter() - stage_started) * 1000, 3)
+    images = raster_images + vector_figures
+    ocr_regions, excluded_ocr_regions = exclude_ocr_regions_covered_by_visual_fallback(ocr_regions, images)
+    ledger_by_region = {entry.get("regionId"): entry for entry in candidate_ledger if entry.get("regionId")}
+    for region in ocr_regions:
+        entry = ledger_by_region.get(region.get("id"))
+        if entry:
+            entry["disposition"] = "queued_visual_review" if region.get("visualFallbackCoverage") else "queued"
+            entry["visualFallbackKind"] = region.get("visualFallbackKind", "")
+    for region in excluded_ocr_regions:
+        entry = ledger_by_region.get(region.get("id"))
+        if entry:
+            entry["disposition"] = "excluded_non_text"
+            entry["reason"] = region.get("reason", "visual_fallback")
+    stage_started = time.perf_counter()
+    tables = table_regions(page, page_number, images, formulas)
+    timings["tableDetectionMs"] = round((time.perf_counter() - stage_started) * 1000, 3)
+    timings["objectEnumerationMs"] = round((time.perf_counter() - object_started) * 1000, 3)
+    stage_started = time.perf_counter()
+    flow = column_flow(page.chars, float(page.width), float(page.height), page.bbox[:2], images + tables)
+    edges = paragraph_edges(page, flow)
+    isolate_sidebars(page, edges)
+    formulas = [
+        formula for formula in formulas
+        if not any(
+            bbox_overlap_ratio(formula["bbox"], region["bbox"]) >= 0.55
+            for region in tables + images if not region.get("preserveSourceText")
+        )
+    ]
+    broken_formulas = [formula for formula in formulas if formula.get("needsVisualFallback")]
+    for formula_index, formula in enumerate(formulas, start=1):
+        formula["formulaIndex"] = formula_index
+    for formula_index, formula in enumerate(broken_formulas, start=1):
+        formula["fallbackIndex"] = formula["formulaIndex"]
+    visual_tables = [table for table in tables if table.get("needsVisualFallback")]
+    timings["readingOrderAndGroupingMs"] = round((time.perf_counter() - stage_started) * 1000, 3)
+    stage_started = time.perf_counter()
+    render_visual_regions(page, page_number, images + broken_formulas + visual_tables, asset_dir, False)
+    # Resolve the candidate marker only after the source pixels were rendered.
+    # A failed/unwritten fallback must keep OCR in the unresolved/review path.
+    for ocr_region in ocr_regions:
+        if not ocr_region.get("visualFallbackCandidate"):
+            continue
+        fallback = next((image for image in images
+                         if bbox_overlap_ratio(ocr_region.get("bbox", []), image.get("bbox", [])) >= .98), None)
+        ocr_region["visualFallbackAssetStatus"] = fallback.get("assetStatus") if fallback else "missing"
+        ocr_region["visualFallbackCoverage"] = bool(fallback and fallback.get("assetStatus") in {"rendered", "reused"})
+        entry = ledger_by_region.get(ocr_region.get("id"))
+        if entry:
+            entry["disposition"] = "queued_visual_review" if ocr_region["visualFallbackCoverage"] else "queued_review"
+    timings["visualRenderMs"] = round((time.perf_counter() - stage_started) * 1000, 3)
+    stage_started = time.perf_counter()
+    rendered_images = sum(1 for image in images if image.get("assetStatus") in {"rendered", "reused"})
+    inject_formula_fallback_markers(page, formulas, page_number)
+    inject_table_markers(page, tables, page_number)
+    inject_image_markers(page, images, page_number)
 
+    glyphs = preserve_unknown_glyphs(page, page_number, asset_dir, render_visual_regions)
+    text = extract_page_text(page, images, flow)
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text).rstrip()
+    text = normalize_layout_indentation(separate_margin_lines(text, edges))
+    enriched_text = enrich_text_with_math(text, formulas, page_number)
+    enriched_text = expand_table_markers(enriched_text, tables)
+    edges = bind_paragraph_edges(edges, enriched_text)
+    cid_artifacts = enriched_text.count("(cid:")
+    markdown_lines.extend([f"<!-- pdf-page: {page_number} -->", "", enriched_text, ""])
+    for table_index, table in enumerate(tables, start=1):
+        rendered_table = markdown_table(table)
+        if rendered_table and not table.get("inlinePlaceholder"):
+            markdown_lines.extend([f"<!-- pdf-table: page={page_number} index={table_index} -->", "", rendered_table, ""])
+    for image_index, image in enumerate(images, start=1):
+        if image.get("assetFile") and not image.get("inlinePlaceholder"):
+            markdown_lines.extend([f"<!-- pdf-image: page={page_number} index={image_index} file={image['assetFile']} -->", ""])
+    for formula_index, formula in enumerate(broken_formulas, start=1):
+        if formula.get("assetFile") and not formula.get("inlinePlaceholder"):
+            formula_mode = "block" if formula.get("displayMathLine") else "inline"
+            fallback_index = int(formula.get("fallbackIndex", formula_index))
+            markdown_lines.extend([f"<!-- pdf-formula: page={page_number} index={fallback_index} file={formula['assetFile']} mode={formula_mode} -->", ""])
+
+    timings["markdownAssemblyMs"] = round((time.perf_counter() - stage_started) * 1000, 3)
+    timings["totalMs"] = round((time.perf_counter() - timing_started) * 1000, 3)
+
+    # Character coordinates are internal reconstruction data and can
+    # be large; do not persist them in the public visual map.
+    for formula in formulas:
+        formula.pop("_chars", None)
+    regions = formulas + images + tables + glyphs
+    return {
+        "markdown": "\n".join(markdown_lines).strip(),
+        "page": {"page": page_number, "width": round(float(page.width), 2),
+                 "coordinateOrigin": list(page.bbox[:2]),
+                 "paragraphEdges": edges,
+                 "height": round(float(page.height), 2), "regions": regions,
+                 "readingOrder": {"strategy": flow.get("strategy", "column_major") if flow else "preserved", "columns": 2 if flow else None, "evidence": flow},
+                 "sourceTextCharacters": source_text_count, "requiresOcr": bool(ocr_regions),
+                 "ocrRegions": ocr_regions, "ocrExcludedRegions": excluded_ocr_regions,
+                 "ocrCandidateLedger": candidate_ledger},
+        "summary": {
+            "formulaRegions": len(formulas), "imageRegions": len(images),
+            "renderedImages": rendered_images, "tableRegions": len(tables),
+            "imageObjectCandidates": sum(int(image.get("sourcePlacementCount", 1)) for image in images),
+            "imageRegionsMerged": sum(1 for image in images if image.get("reductionReason")),
+            "imageRegionsWithSourceObjects": sum(1 for image in images if image.get("sourceObject") or image.get("sourceObjectCount")),
+            "imageSourceObjectCount": sum(int(image.get("sourceObjectCount", 0)) for image in images),
+            "ocrRegionsExcludedByVisualFallback": len(excluded_ocr_regions),
+            "ocrCandidateCount": len(candidate_ledger),
+            "ocrCandidateDispositions": {
+                key: sum(1 for entry in candidate_ledger if entry.get("disposition") == key)
+                for key in sorted({entry.get("disposition", "unknown") for entry in candidate_ledger})
+            },
+            "vectorPrimitiveCount": vector_primitive_total,
+            "pathologicalVectorFallback": bool(
+                used_text_image_layout or getattr(page, "_schema_docs_text_image_page", False)
+            ),
+            "cidArtifacts": cid_artifacts, "repairedCidArtifacts": repaired_cid_artifacts,
+            "repairedMathGlyphs": repaired_math_glyphs,
+            "unmappedGlyphs": len(glyphs),
+            "visualFallbackRegions": len(broken_formulas) + len(visual_tables) + len(glyphs)
+                + sum(bool(image.get("preserveSourceText")) for image in images),
+            "failedVisualRegions": sum(r.get("assetStatus") == "failed" for r in regions),
+            "visualOnlyCandidateRegions": sum(bool(r.get("visualFallbackCoverage")) for r in ocr_regions),
+            "pagesWithVisualRegions": int(bool(regions)),
+            "timingsMs": timings,
+        },
+    }
+
+
+def main():
+    from pdfLayoutSession import run_layout_session
     parser = argparse.ArgumentParser()
     parser.add_argument("source")
     parser.add_argument("markdown_output")
@@ -2026,139 +2573,15 @@ def main():
     parser.add_argument("--start-page", type=int, default=1)
     parser.add_argument("--max-pages", type=int, default=0)
     parser.add_argument("--asset-dir", default="")
+    parser.add_argument("--cache-dir", default="")
+    parser.add_argument("--window-size", type=int, default=16)
+    parser.add_argument("--max-worker-resident-bytes", type=int, default=0)
+    parser.add_argument("--max-temporary-bytes", type=int, default=0)
     args = parser.parse_args()
-
-    source = Path(args.source)
-    markdown_path = Path(args.markdown_output)
-    manifest_path = Path(args.manifest_output)
-    markdown_path.parent.mkdir(parents=True, exist_ok=True)
-    manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    asset_dir = Path(args.asset_dir) if args.asset_dir else None
-    allow_asset_reuse = False
-    if asset_dir:
-        asset_dir.mkdir(parents=True, exist_ok=True)
-        previous_map = asset_dir / "visual-map.json"
-        if previous_map.is_file():
-            try:
-                previous = json.loads(previous_map.read_text(encoding="utf-8"))
-                allow_asset_reuse = previous.get("sourceFile") == source.name
-            except Exception:
-                allow_asset_reuse = False
-
-    markdown_lines = [f"# {source.stem}", ""]
-    pages_with_regions = []
-    total_formula_regions = 0
-    total_image_regions = 0
-    total_table_regions = 0
-    cid_artifacts = 0
-    repaired_cid_artifacts = 0
-    repaired_math_glyphs = 0
-    rendered_images = 0
-
-    with pdfplumber.open(source) as document:
-        start_index = max(0, min(len(document.pages), args.start_page - 1))
-        end_index = len(document.pages) if args.max_pages <= 0 else min(start_index + args.max_pages, len(document.pages))
-        for page_index in range(start_index, end_index):
-            page = document.pages[page_index]
-            page_number = page_index + 1
-            repaired_cid_artifacts += repair_known_cid_chars(page)
-            repaired_math_glyphs += repair_tex_font_ascii_chars(page)
-            reattach_inline_operator_baselines(page)
-            inline_operators = inline_large_operator_regions(page, page_number)
-            inline_operator_keys = {
-                char_position_key(char)
-                for formula in inline_operators
-                for char in formula.get("_chars", [])
-            }
-            formulas = merge_complex_formula_regions(
-                formula_regions(page, page_number, inline_operator_keys),
-                page,
-            ) + inline_operators
-            formulas.sort(key=lambda formula: (
-                float(formula["bbox"][1]),
-                float(formula["bbox"][0]),
-            ))
-            images = image_regions(page, page_number) + figure_regions(page, page_number)
-            tables = table_regions(page, page_number, images, formulas)
-            formulas = [
-                formula for formula in formulas
-                if not any(
-                    bbox_overlap_ratio(formula["bbox"], region["bbox"]) >= 0.55
-                    for region in tables + images
-                )
-            ]
-            broken_formulas = [formula for formula in formulas if formula.get("needsVisualFallback")]
-            for formula_index, formula in enumerate(formulas, start=1):
-                formula["formulaIndex"] = formula_index
-            for formula_index, formula in enumerate(broken_formulas, start=1):
-                formula["fallbackIndex"] = formula["formulaIndex"]
-            visual_tables = [table for table in tables if table.get("needsVisualFallback")]
-            render_visual_regions(page, page_number, images + broken_formulas + visual_tables, asset_dir, allow_asset_reuse)
-            rendered_images += sum(1 for image in images if image.get("assetStatus") in {"rendered", "reused"})
-            inject_formula_fallback_markers(page, formulas, page_number)
-            inject_table_markers(page, tables, page_number)
-
-            text = extract_page_text(page, images)
-            text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text).rstrip()
-            text = normalize_layout_indentation(text)
-            enriched_text = enrich_text_with_math(text, formulas, page_number)
-            enriched_text = expand_table_markers(enriched_text, tables)
-            cid_artifacts += enriched_text.count("(cid:")
-            markdown_lines.extend([f"<!-- pdf-page: {page_number} -->", "", enriched_text, ""])
-            for table_index, table in enumerate(tables, start=1):
-                rendered_table = markdown_table(table)
-                if rendered_table and not table.get("inlinePlaceholder"):
-                    markdown_lines.extend([f"<!-- pdf-table: page={page_number} index={table_index} -->", "", rendered_table, ""])
-            for image_index, image in enumerate(images, start=1):
-                if image.get("assetFile"):
-                    markdown_lines.extend([f"<!-- pdf-image: page={page_number} index={image_index} file={image['assetFile']} -->", ""])
-            for formula_index, formula in enumerate(broken_formulas, start=1):
-                if formula.get("assetFile") and not formula.get("inlinePlaceholder"):
-                    formula_mode = "block" if formula.get("displayMathLine") else "inline"
-                    fallback_index = int(formula.get("fallbackIndex", formula_index))
-                    markdown_lines.extend([f"<!-- pdf-formula: page={page_number} index={fallback_index} file={formula['assetFile']} mode={formula_mode} -->", ""])
-
-            # Character coordinates are internal reconstruction data and can
-            # be large; do not persist them in the public visual map.
-            for formula in formulas:
-                formula.pop("_chars", None)
-            regions = formulas + images + tables
-            total_formula_regions += len(formulas)
-            total_image_regions += len(images)
-            total_table_regions += len(tables)
-            if regions:
-                pages_with_regions.append({
-                    "page": page_number,
-                    "width": round(float(page.width), 2),
-                    "height": round(float(page.height), 2),
-                    "regions": regions,
-                })
-
-        manifest = {
-            "schema": "schema-docs.pdf-visual-map.v2",
-            "sourceFile": source.name,
-            "pageCount": len(document.pages),
-            "pageRange": {
-                "start": start_index + 1 if start_index < len(document.pages) else 0,
-                "end": end_index,
-            },
-            "pagesAnalyzed": max(0, end_index - start_index),
-            "summary": {
-                "formulaRegions": total_formula_regions,
-                "imageRegions": total_image_regions,
-                "renderedImages": rendered_images,
-                "tableRegions": total_table_regions,
-                "cidArtifacts": cid_artifacts,
-                "repairedCidArtifacts": repaired_cid_artifacts,
-                "repairedMathGlyphs": repaired_math_glyphs,
-                "pagesWithVisualRegions": len(pages_with_regions),
-            },
-            "pages": pages_with_regions,
-        }
-
-    markdown_path.write_text("\n".join(markdown_lines).strip() + "\n", encoding="utf-8")
-    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps({"ok": True, **manifest["summary"], "pageCount": manifest["pageCount"]}))
+    from pdfResources import ResourceMonitor
+    with ResourceMonitor([Path(args.markdown_output).parent, args.cache_dir, args.asset_dir],
+                         args.max_worker_resident_bytes, args.max_temporary_bytes):
+        run_layout_session(args, extract_layout_page)
 
 
 if __name__ == "__main__":

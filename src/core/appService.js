@@ -6,7 +6,7 @@ import { saveMarkdown, readMarkdown, deleteMarkdown } from "./markdown.js";
 import { importFileToWorkspace, importFileBufferToWorkspace, checkWorkspaceUpdates, refreshWorkspaceRecord, getRecordStatuses, previewRecordRefresh } from "./records.js";
 import { inspectDatasetAsJob } from "./datasets.js";
 import { convertDocumentToMarkdownAsJob } from "./documents.js";
-import { listJobs } from "./jobs.js";
+import { cancelJob, listJobs } from "./jobs.js";
 import { listQueryTables, prepareQueryResultForAi, runQueryAsJob } from "./queries.js";
 import { previewAiPayloadAsJob, sendAiRequestAsJob } from "./ai.js";
 import { csvImporter } from "../adapters/csvImporter.js";
@@ -19,7 +19,7 @@ import { createMemoryQueryEngine } from "../adapters/memoryQueryEngine.js";
 import { createOpenAiCompatibleClient } from "../adapters/openAiCompatibleClient.js";
 import { AppError } from "./errors.js";
 import { createExchangeMarkdown, readExchangePackage, writeExchangePackage, explainExchangePackage, verifyExchangePackage, generateTrustReport, writeExchangePackageReceiverReport } from "./exchangePackage.js";
-import { exportMarkdownDocument, readMarkdownFile, writeRenderedDocument } from "./documentExports.js";
+import { exportMarkdownDocument, exportSegmentedMarkdownToHtmlDocument, readMarkdownFile, writeRenderedDocument } from "./documentExports.js";
 import {
 getDocumentExchangeCapability,
 listDocumentExchangeCapabilities,
@@ -39,6 +39,7 @@ import { getWorkspaceSettings, updateWorkspaceSettings } from "./settings.js";
 import { getRealSampleSummary, exportRealSampleReportMd, writeRealSampleReportMd } from "./realSamples.js";
 import { detectAdapterCapabilities } from "./adapterCapabilities.js";
 import { estimateTables } from "./qualityReport.js";
+import { readDocumentIr } from "./documentIrStore.js";
 import { materializePdfVisualAssets, renderPdfVisualRegion } from "../adapters/pdfVisualRenderer.js";
 import { assertSafeWritePath } from "./pathGuard.js";
 import {
@@ -146,6 +147,7 @@ saveMarkdown: fwd(saveMarkdown),
 readMarkdown: fwd(readMarkdown),
 deleteMarkdown: fwd(deleteMarkdown),
 exportMarkdownDocument: fwd(exportMarkdownDocument),
+exportSegmentedMarkdownToHtml: fwd(exportSegmentedMarkdownToHtmlDocument),
 listDocumentExchangeCapabilities() {
 return listDocumentExchangeCapabilities();
 },
@@ -201,11 +203,11 @@ const dataset = findDataset(manifest, datasetId);
 if (!dataset) throw new AppError("dataset_not_found", `Dataset not found: ${datasetId}`, { datasetId });
 return inspectDatasetAsJob(workspacePath, datasetId, datasetImporterForType(dataset.sourceType));
 },
-async convertDocument(documentId) {
+async convertDocument(documentId, options = {}) {
 const manifest = await readManifest(workspacePath);
 const document = findDocument(manifest, documentId);
 if (!document) throw new AppError("document_not_found", `Document not found: ${documentId}`, { documentId });
-return convertDocumentToMarkdownAsJob(workspacePath, documentId, documentConverterForType(document.sourceType));
+return convertDocumentToMarkdownAsJob(workspacePath, documentId, documentConverterForType(document.sourceType), options);
 },
 async retryDocumentExtraction(documentId, preferredExtractor = "auto") {
 const manifest = await readManifest(workspacePath);
@@ -424,6 +426,7 @@ listEvidenceRecords: fwd(listEvidenceRecords),
 getEvidenceRecord: fwd(getEvidenceRecord),
 deleteEvidenceRecord: fwd(deleteEvidenceRecord),
 listJobs: fwd(listJobs),
+cancelJob: fwd(cancelJob),
 listTables() {
 return listQueryTables(workspacePath, createMemoryQueryEngine);
 },
@@ -538,16 +541,40 @@ body = renderDatasetMarkdown(dataset);
 throw new AppError("record_not_found", `Record not found: ${recordId}`, { recordId });
 }
 const evidenceRecords = await listEvidenceRecords(workspacePath);
+const currentOutputHash = `sha256:${createHash("sha256").update(body, "utf8").digest("hex")}`;
+const currentSourceHash = document?.sourcePath ? await hashFile(document.sourcePath) : "";
 const evidence = [...evidenceRecords]
-.reverse()
-.find((candidate) => candidate.sourceRef === recordId);
+ .reverse()
+ .find((candidate) => candidate.sourceRef === recordId
+  && (!candidate.outputArtifactHash || candidate.outputArtifactHash === currentOutputHash)
+  && (!currentSourceHash || !candidate.inputFileHash || candidate.inputFileHash === currentSourceHash));
+const evidenceWarning = evidence ? "" : "No evidence record matched the current source and Markdown hashes; package evidence is unverified.";
 const exportFormats = input.exportFormats ?? (document ? ["docx", "pdf"] : []);
 let qualityReport = null;
+let documentIrSummary = null;
+let documentIrWarning = "";
 if (document?.outputMarkdownPath) {
 try {
-qualityReport = JSON.parse(await readFile(document.outputMarkdownPath.replace(/\.md$/, ".quality.json"), "utf8"));
+ qualityReport = JSON.parse(await readFile(document.outputMarkdownPath.replace(/\.md$/, ".quality.json"), "utf8"));
 } catch {
-qualityReport = null;
+ qualityReport = null;
+}
+if (document?.documentIrRevisionId) {
+try {
+const currentMarkdownHash = await hashFile(document.outputMarkdownPath);
+const currentSourceHash = document.sourcePath ? await hashFile(document.sourcePath) : "";
+if ((document.documentIrMarkdownHash && document.documentIrMarkdownHash !== currentMarkdownHash)
+ || (document.documentIrSourceHash && document.documentIrSourceHash !== currentSourceHash)) {
+ throw new AppError("document_ir_stale", "DocumentIR does not match the current Markdown/source revision.", { recordId });
+}
+const documentIr = await readDocumentIr(workspacePath, document.id, document.documentIrRevisionId);
+documentIrSummary = documentIr;
+ } catch (error) {
+ documentIrSummary = null;
+ documentIrWarning = error?.code === "document_ir_stale" || error?.code === "document_ir_corrupt"
+  ? "The structured document representation is stale or corrupt for the current Markdown/source revision and was omitted from this package."
+  : "The structured document representation could not be verified and was omitted from this package.";
+}
 }
 }
 const sourceRecord = {
@@ -572,6 +599,7 @@ exportFormats,
 evidence,
 sourceRecords: input.sourceRecords ?? [sourceRecord],
 conversionQuality: input.conversionQuality ?? (qualityReport ? [qualityReport] : []),
+documentIrSummary: input.documentIrSummary ?? documentIrSummary,
 aiSendGateSummaries: input.aiSendGateSummaries ?? [{
 recordId,
 decision: prepared.preview?.sendGateDecision ?? "",
@@ -579,7 +607,7 @@ estimatedTokens: prepared.preview?.tokenEstimate ?? 0,
 qualityWarnings: prepared.preview?.qualityWarnings ?? [],
 recommendedNextAction: prepared.preview?.recommendedNextAction ?? ""
 }],
-knownLimits: input.knownLimits ?? (prepared.preview?.knownLimits ?? [])
+ knownLimits: [...(input.knownLimits ?? (prepared.preview?.knownLimits ?? [])), ...(documentIrWarning ? [documentIrWarning] : []), ...(evidenceWarning ? [evidenceWarning] : [])]
 });
 return {
 ...packageResult,

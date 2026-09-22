@@ -117,6 +117,18 @@ test("hides document process metadata when reading markdown", async () => {
   assert.doesNotMatch(content, /Human-readable Markdown view/);
   assert.doesNotMatch(content, /Source format:/);
 });
+test("repairs legacy generated PDF inline image spacing when reading converted Markdown", async () => {
+  const workspace = await tempDir("lft-legacy-pdf-inline-image-");
+  await openOrCreateWorkspace(workspace);
+  const relativePath = path.join("outputs", "readable", "math.readable_1.md");
+  const fullPath = path.join(workspace, relativePath);
+  await mkdir(path.dirname(fullPath), { recursive: true });
+  const image = "![Inline formula preserved from PDF page 1780](<../assets/math.pdf/page-001780-formula-000-8d699c07.png>)";
+  await writeFile(fullPath, `Before\n\n+                  ${image}+\n\nAfter\n`, "utf8");
+  const content = await readMarkdown(workspace, relativePath);
+  assert.ok(content.includes(`+${image}+`));
+  assert.doesNotMatch(content, /^\\\+/m);
+});
 test("blocks stale readable segments that already contain mojibake", async () => {
   const workspace = await tempDir("lft-stale-readable-mojibake-");
   await openOrCreateWorkspace(workspace);

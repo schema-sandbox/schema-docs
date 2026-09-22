@@ -4,7 +4,12 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { readManifest, writeManifest } from "./manifest.js";
 import { AppError } from "./errors.js";
+import { createId } from "./ids.js";
 import { pdfBodyText, runPdfExtractionPipeline } from "../adapters/pdfExtractorPipeline.js";
+import { buildPdfDocumentIr } from "../adapters/pdfDocumentIr.js";
+import { buildDocumentIr } from "../adapters/documentIr.js";
+import { writeDocumentIr } from "./documentIrStore.js";
+import { prepareSafeWritePath } from "./pathGuard.js";
 export function calculateTextMetrics(markdown) {
 const charsExtracted = markdown.length;
 const replacementCharCount = (markdown.match(/\ufffd/g) || []).length;
@@ -22,6 +27,19 @@ asciiRatio: charsExtracted === 0 ? 0 : asciiCount / charsExtracted
 function documentOutputBaseName(document) {
 return safeFileName(document.title || path.parse(path.basename(document.sourcePath || "document")).name);
 }
+function extractionRevisionId({ sourceHash, converter, extractorName, markdown, pageLedger, visualMap, options }) {
+ const identity = JSON.stringify({
+  sourceHash,
+  converter: converter?.name || "",
+  converterVersion: String(converter?.cacheVersion || "1"),
+  extractorName: extractorName || "",
+  options: options || {},
+  sourcePageCount: pageLedger?.sourcePageCount ?? null,
+  visualSummary: visualMap?.summary || null,
+  markdown
+ });
+ return `extract-${computeBufferHash(Buffer.from(identity, "utf8")).slice(0, 24)}`;
+}
 export async function writePdfDiagnostics(workspacePath, recordId, data) {
 const dir = path.join(workspacePath, "outputs", "diagnostics");
 await mkdir(dir, { recursive: true });
@@ -29,8 +47,8 @@ const diagnosticsPath = path.join(dir, `${recordId}.pdf-diagnostics.json`);
 await writeFile(diagnosticsPath, JSON.stringify(data, null, 2), "utf8");
 return diagnosticsPath;
 }
-async function writePdfVisualMap(workspacePath, baseName, sourcePath, result) {
-const dir = path.join(workspacePath, "outputs", "assets", `${baseName}.pdf`);
+async function writePdfVisualMap(outputRoot, baseName, sourcePath, result) {
+const dir = path.join(outputRoot, "assets", `${baseName}.pdf`);
 await mkdir(dir, { recursive: true });
 const semanticLoss = result.stats?.semanticLoss || {};
 const visualMap = result.visualMap || {
@@ -103,7 +121,7 @@ const label = kind === "formula"
 return `![${label} preserved from PDF page ${pageNumber}](<${relativePath}>)`;
 }
 );
-const blockImages = attached.replace(
+const blockImages = normalizeGeneratedPdfInlineImageLines(attached).replace(
 /!\[(?:Formula|Figure|Table) preserved from PDF page \d+\]\(<[^>\n]+>\)/g,
 (match, offset, source) => {
 const before = offset > 0 ? source[offset - 1] : "";
@@ -132,13 +150,16 @@ return { available: false, version: null };
 import { runJob } from "./jobs.js";
 import { safeFileName, computeBufferHash } from "./records.js";
 import { createQualityReport } from "./qualityReport.js";
+import { reflowPdfTables } from "../processing/tableStructure.js";
 import { appendTimelineEvent } from "./timeline.js";
 import { addMarkdownVersion } from "./versions.js";
 import { appendConversionAudit } from "./conversionAudits.js";
 import { appendEvidenceRecord, hashFile } from "./evidence.js";
 import {
 createReadableMarkdown,
+reflowPdfParagraphs,
 createReadableMarkdownSegmentIndex,
+normalizeGeneratedPdfInlineImageLines,
 readableMarkdownStats,
 splitReadableMarkdown
 } from "./readableMarkdown.js";
@@ -169,6 +190,10 @@ document.status !== "ready"
 || document.extractionConverterName !== converter.name
 || document.extractionConverterVersion !== converterVersion
 || document.extractionQuality?.lowReadableText
+|| (document.sourceType === "pdf" && (document.extractionQuality?.partial
+  || document.extractionQuality?.pendingOcrPages > 0 || document.extractionQuality?.unresolvedPages > 0
+  || document.extractionQuality?.reviewPages > 0 || document.extractionQuality?.ocrReviewRegions > 0
+  || document.extractionQuality?.validation?.passed === false))
 || (document.sourceType === "pdf" && document.extractionQuality?.textLayerDetected === false)
 || document.quality?.hasOcrMissing
 || (document.warnings && document.warnings.some((w) => w.includes("Low-readable")))
@@ -192,6 +217,7 @@ if (
 ) {
 return {
 documentId: document.id,
+conversionMode: "cache",
 outputMarkdownPath: document.outputMarkdownPath,
 warnings: document.warnings ?? [],
 qualityReportId: document.qualityReportId ?? "",
@@ -428,23 +454,70 @@ auditId: audit.id
 };
 }
 const baseName = documentOutputBaseName(document);
+const originalDocument = structuredClone(document);
+const revisionSourceHash = await hashFile(document.sourcePath);
+const revision = createId("conversion");
+const outputRoot = path.join(workspacePath, "outputs", "revisions", document.id, revision);
+if (!/^[A-Za-z0-9_-]+$/.test(document.id)) throw new AppError("document_revision_invalid", "Invalid document storage identity.");
+await prepareSafeWritePath(path.join(outputRoot, "revision.json"), workspacePath, [".json"]);
+await mkdir(outputRoot, { recursive: true });
 let result;
 if (document.sourceType === "pdf" && converter.name === "pdf-text-layer-converter") {
 let progressQueue = Promise.resolve();
 let lastProgress = 40;
 result = await runPdfExtractionPipeline(document.sourcePath, {
 converter,
-preferredExtractor: options.preferredExtractor,
-markerOutputDir: path.join(workspacePath, "outputs", "assets", `${document.id}-marker`),
-markerMarkdownBaseDir: path.join(workspacePath, "outputs"),
+  preferredExtractor: options.preferredExtractor,
+  pythonPath: options.pythonPath,
+  layoutStartPage: options.layoutStartPage,
+layoutMaxPages: options.layoutMaxPages,
+pageWindowSize: options.pageWindowSize,
+layoutTimeoutMs: options.layoutTimeoutMs,
+ocrTimeoutMs: options.ocrTimeoutMs,
+ocrPageTimeoutMs: options.ocrPageTimeoutMs,
+ocrRegionTimeoutMs: options.ocrRegionTimeoutMs,
+maxResidentBytes: options.maxResidentBytes,
+maxWorkerResidentBytes: options.maxWorkerResidentBytes,
+maxTemporaryBytes: options.maxTemporaryBytes,
+layoutCacheDir: options.checkpoint === false ? undefined : path.join(workspacePath, ".ai-doc-exchange", "cache", "pdf-layout", document.id),
+ocrCacheDir: options.checkpoint === false ? undefined : path.join(workspacePath, ".ai-doc-exchange", "cache", "pdf-ocr", document.id),
+allowLargePageWindow: options.allowLargePageWindow ?? (options.maxInputBytes === undefined && converter.preferPageBackend === true),
+onLayoutPage: async (page) => {
+ await options.assertNotCancelled?.();
+ await options.updateCheckpointPage?.({
+  ...page,
+  status: page.requiresOcr ? "partial" : (page.artifactPath ? "completed" : "failed"),
+  qualityStatus: page.requiresOcr ? "ocr_required" : "native_text"
+ });
+ await options.update?.({ progress: Math.min(85, 30 + Math.round(55 * page.pageNumber / page.pageCount)),
+  message: `PDF page ${page.pageNumber} of ${page.pageCount}${page.reused ? " (verified cache)" : ""}` });
+},
+markerOutputDir: path.join(outputRoot, "assets", `${document.id}-marker`),
+markerMarkdownBaseDir: outputRoot,
 markerForceOcr: options.markerForceOcr,
-layoutAssetDir: path.join(workspacePath, "outputs", "assets", `${baseName}.pdf`),
+ocrLanguages: options.ocrLanguages,
+maxDecompressedBytes: options.maxDecompressedBytes,
+maxInputBytes: options.maxInputBytes,
+assertNotCancelled: options.assertNotCancelled,
+layoutAssetDir: path.join(outputRoot, "assets", `${baseName}.pdf`),
 onProgress: (msg, percent) => {
 if (options && typeof options.update === "function") {
 if (Number.isFinite(percent)) lastProgress = percent;
 progressQueue = progressQueue.then(() =>
 options.update({ progress: lastProgress, message: msg }).catch(() => {})
 );
+}
+const ocrPage = String(msg || "").match(/^OCR page (\d+) of /i);
+if (ocrPage && typeof options.updateCheckpointPage === "function") {
+ progressQueue = progressQueue.then(() => options.updateCheckpointPage({ pageNumber: Number(ocrPage[1]), status: "processing", qualityStatus: "ocr_processing" }).catch(() => {}));
+}
+const ocrFailedPage = String(msg || "").match(/^OCR failed page (\d+) of /i);
+if (ocrFailedPage && typeof options.updateCheckpointPage === "function") {
+ progressQueue = progressQueue.then(() => options.updateCheckpointPage({
+  pageNumber: Number(ocrFailedPage[1]),
+  status: "failed",
+  error: "OCR failed for source page"
+ }).catch(() => {}));
 }
 }
 });
@@ -453,15 +526,22 @@ await progressQueue;
 result = await converter.convert({
 sourcePath: document.sourcePath,
 sourceName: `${baseName}.${document.sourceType}`,
-assetDir: path.join(workspacePath, "outputs", "assets", `${baseName}.${document.sourceType}`),
-assetRelativeBase: `assets/${baseName}.${document.sourceType}`
+assetDir: path.join(outputRoot, "assets", `${baseName}.${document.sourceType}`),
+assetRelativeBase: `assets/${baseName}.${document.sourceType}`,
+assertNotCancelled: options.assertNotCancelled
 });
 }
+// Conversion output is still a candidate until all cancellation checks pass.
+// This check is deliberately inside the document writer so a converter that
+// observes cancellation before returning cannot commit a replacement.
+await options.assertNotCancelled?.();
 const outputName = `${baseName}.md`;
-const outputPath = path.join(workspacePath, "outputs", outputName);
-const readablePath = path.join(workspacePath, "outputs", "readable", `${baseName}.readable.md`);
+const outputPath = path.join(outputRoot, outputName);
+const versionHistoryPath = document.markdownVersionPath || path.relative(workspacePath, document.outputMarkdownPath || outputPath).split(path.sep).join("/");
+document.markdownVersionPath = versionHistoryPath;
+const readablePath = path.join(outputRoot, "readable", `${baseName}.readable.md`);
 const readableSegmentBaseName = `${baseName}.readable`;
-const existingContent = await readFile(outputPath, "utf8").catch(() => "");
+const existingContent = document.outputMarkdownPath ? await readFile(document.outputMarkdownPath, "utf8").catch(() => "") : "";
 if (options.force === true
 && options.preferredExtractor
 && (typeof result.markdown !== "string" || (document.sourceType === "pdf"
@@ -482,7 +562,7 @@ throw new AppError(
 `The requested ${options.preferredExtractor} extractor did not produce usable Markdown. The previous extraction was kept unchanged.`,
 {
 documentId,
-preferredExtractor: options.preferredExtractor,
+  preferredExtractor: options.preferredExtractor,
 previousExtractor: document.extractorName || "",
 fallbackExtractor: result.extractorName || ""
 }
@@ -495,6 +575,20 @@ if (existingHash !== document.lastExtractedHash) {
 userEdited = true;
 }
 }
+const currentVersionSnapshot = userEdited ? {
+ quality: structuredClone(document.quality || {}),
+ extractionQuality: structuredClone(document.extractionQuality || {}),
+ qualityReportId: document.qualityReportId || "",
+ warnings: Array.isArray(document.warnings) ? [...document.warnings] : [],
+ markdownOutputs: document.markdownOutputs ? structuredClone(document.markdownOutputs) : null,
+ extractorName: document.extractorName || "",
+ extractionConverterName: document.extractionConverterName || "",
+ extractionConverterVersion: document.extractionConverterVersion || "",
+ pdfVisualMapPath: document.pdfVisualMapPath || "",
+ pdfVisualAssetsIndexPath: document.pdfVisualAssetsIndexPath || "",
+ pdfRichAssetsPath: document.pdfRichAssetsPath || "",
+ pdfDiagnosticsPath: document.pdfDiagnosticsPath || ""
+} : null;
 let readabilityState = "readable";
 if (document.sourceType === "pdf") {
  const textLayerDetected = result.textLayerDetected !== undefined
@@ -529,11 +623,12 @@ if (document.sourceType === "pdf") {
 const warnings = result.warnings ?? [];
 let pdfVisualArtifacts = null;
 if (document.sourceType === "pdf") {
-try {
-pdfVisualArtifacts = await writePdfVisualMap(workspacePath, baseName, document.sourcePath, result);
+ await options.assertNotCancelled?.();
+ try {
+pdfVisualArtifacts = await writePdfVisualMap(outputRoot, baseName, document.sourcePath, result);
 result.markdown = attachPdfImagesToMarkdown(result.markdown, baseName, false);
 } catch (error) {
-warnings.push(`PDF visual content map could not be written: ${error.message}`);
+throw new AppError("document_revision_failed", `PDF visual content could not be stored: ${error.message}`);
 }
 }
 if (document.sourceType === "txt" && hasHighMojibakeRatio(result.markdown) && !warnings.some((warning) => warning.includes("replacement characters"))) {
@@ -542,13 +637,14 @@ warnings.push("Decoded TXT output contains too many replacement characters. The 
 let finalWritePath = outputPath;
 let finalReadablePath = readablePath;
 let readableSegmentOutput = null;
-const lowReadable = readabilityState === "ocr_required" || readabilityState === "low_readable_all_extractors_failed";
+const lowReadable = readabilityState === "ocr_required" || readabilityState.startsWith("low_readable_");
 const extractorName = result.extractorName || (document.sourceType === "pdf" ? "built-in" : converter.name);
 const extractorFallbacksTried = result.stats?.fallbacksTried || [];
 let readableMarkdown = lowReadable
 ? (createLowReadableMarkdownNotice({ sourceType: document.sourceType, sourceName: document.title || path.basename(document.sourcePath), warnings, attempts: result.attempts, detectedEncoding: result.extractionQuality?.detectedEncoding }) + "\n")
 : createReadableMarkdown(result.markdown, {
 sourceType: document.sourceType,
+visualMap: result.visualMap,
 sourceName: document.title || path.basename(document.sourcePath)
 });
 if (!lowReadable) {
@@ -562,10 +658,12 @@ manifest.markdownVersions = manifest.markdownVersions || [];
 if (userEdited) {
 const refreshedName = `${documentOutputBaseName(document)}.refreshed.md`;
 const refreshedReadableName = `${documentOutputBaseName(document)}.refreshed.readable.md`;
-finalWritePath = path.join(workspacePath, "outputs", refreshedName);
-finalReadablePath = path.join(workspacePath, "outputs", "readable", refreshedReadableName);
-await writeFile(finalWritePath, aiReadyContent, "utf8");
-await writeFile(finalReadablePath, readableMarkdown, "utf8");
+finalWritePath = path.join(outputRoot, refreshedName);
+finalReadablePath = path.join(outputRoot, "readable", refreshedReadableName);
+ await options.assertNotCancelled?.();
+ await writeFile(finalWritePath, aiReadyContent, "utf8");
+ await options.assertNotCancelled?.();
+ await writeFile(finalReadablePath, readableMarkdown, "utf8");
 readableSegmentOutput = await writeReadableMarkdownSegments({
 workspacePath,
 readablePath: finalReadablePath,
@@ -580,24 +678,26 @@ document.refreshedMarkdownPath = finalWritePath;
 document.refreshedReadableMarkdownPath = finalReadablePath;
 document.lastRefreshedExtractedHash = computeBufferHash(Buffer.from(aiReadyContent, "utf8"));
 const relativeRefreshed = path.relative(workspacePath, finalWritePath).split(path.sep).join("/");
-const ver = await addMarkdownVersion(workspacePath, relativeRefreshed, "refresh_extract", documentId, result.markdown);
+const ver = await addMarkdownVersion(workspacePath, relativeRefreshed, "refresh_extract", documentId, result.markdown, { deferCommit: true });
 manifest.markdownVersions.push(ver);
 warnings.push(`Local Markdown edits were detected. To avoid overwriting your work, the latest extraction was written to ${relativeRefreshed}.`);
 } else {
 let backupPath = null;
-const relativeOutput = path.relative(workspacePath, outputPath).split(path.sep).join("/");
+const relativeOutput = versionHistoryPath;
 if (existingContent && existingContent.trim() !== aiReadyContent.trim()) {
 const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
 const backupName = `${documentOutputBaseName(document)}.backup-${timestamp}.md`;
-backupPath = path.join(workspacePath, "outputs", backupName);
+backupPath = path.join(outputRoot, backupName);
 await writeFile(backupPath, existingContent, "utf8");
 const relativeBackup = path.relative(workspacePath, backupPath).split(path.sep).join("/");
-const ver = await addMarkdownVersion(workspacePath, relativeOutput, "pre_refresh_backup", documentId, existingContent);
+const ver = await addMarkdownVersion(workspacePath, relativeOutput, "pre_refresh_backup", documentId, existingContent, { deferCommit: true, pendingVersions: manifest.markdownVersions });
 manifest.markdownVersions.push(ver);
 warnings.push(`Local file changes were detected. The previous version was backed up to ${relativeBackup} and registered in version history for ${relativeOutput}.`);
 }
-await writeFile(outputPath, aiReadyContent, "utf8");
-await writeFile(readablePath, readableMarkdown, "utf8");
+ await options.assertNotCancelled?.();
+ await writeFile(outputPath, aiReadyContent, "utf8");
+ await options.assertNotCancelled?.();
+ await writeFile(readablePath, readableMarkdown, "utf8");
 readableSegmentOutput = await writeReadableMarkdownSegments({
 workspacePath,
 readablePath,
@@ -615,7 +715,7 @@ document.lastReadableExtractedHash = computeBufferHash(Buffer.from(readableMarkd
 document.refreshedMarkdownPath = undefined;
 document.refreshedReadableMarkdownPath = undefined;
 document.lastRefreshedExtractedHash = undefined;
-const ver = await addMarkdownVersion(workspacePath, relativeOutput, "initial_extract", documentId, result.markdown);
+const ver = await addMarkdownVersion(workspacePath, relativeOutput, "initial_extract", documentId, result.markdown, { deferCommit: true, pendingVersions: manifest.markdownVersions });
 manifest.markdownVersions.push(ver);
 }
 document.status = "ready";
@@ -640,8 +740,9 @@ scannedLikely: document.sourceType === "pdf" ? (resolvedLowReadableText || !reso
 tableSimplified: result.extractionQuality?.tableSimplified ?? quality.hasTablesSimplified ?? false,
 layoutSimplified: result.extractionQuality?.layoutSimplified ?? true,
 possibleMojibake: result.markdown.includes("\ufffd") || resolvedLowReadableText || (result.extractionQuality?.possibleMojibake ?? false),
-lowReadableText: resolvedLowReadableText,
-unsupportedFeatures: result.extractionQuality?.unsupportedFeatures || ["tables", "multi-column layouts", "images", "formulas", "annotations", "embedded_objects"],
+  lowReadableText: resolvedLowReadableText,
+  partial: Boolean(result.partial),
+  unsupportedFeatures: result.extractionQuality?.unsupportedFeatures || ["tables", "multi-column layouts", "images", "formulas", "annotations", "embedded_objects"],
 confidence: result.extractionQuality?.confidence || (resolvedTextLayerDetected && !resolvedLowReadableText ? "medium" : "low"),
 readabilityState: readabilityState,
  detectedEncoding: result.extractionQuality?.detectedEncoding
@@ -650,11 +751,55 @@ document.pdfVisualMapPath = pdfVisualArtifacts?.visualMapPath;
 document.pdfVisualAssetsIndexPath = pdfVisualArtifacts?.visualAssetsIndexPath;
 document.pdfRichAssetsPath = result.richAssetRoot || undefined;
 document.extractionQuality.semanticLoss = result.stats?.semanticLoss || null;
+document.extractionQuality.validation = result.validation || null;
+document.extractionQuality.backendFailures = result.backendFailures || [];
+document.extractionQuality.assetValidation = result.assetValidation || null;
 document.extractionQuality.formulaDamageLikely = Boolean(result.stats?.semanticLoss?.formulaDamageLikely);
 document.extractionQuality.formulaEncodingArtifacts = result.stats?.semanticLoss?.octalArtifacts || 0;
 document.extractionQuality.cidArtifacts = result.stats?.semanticLoss?.cidArtifacts || 0;
 document.extractionQuality.privateUseArtifacts = result.stats?.semanticLoss?.privateUseArtifacts || 0;
+document.extractionQuality.visualFallbackRegions = result.visualMap?.summary?.visualFallbackRegions ?? result.extractionQuality?.visualFallbackRegions ?? 0;
+document.extractionQuality.failedVisualRegions = result.visualMap?.summary?.failedVisualRegions ?? result.extractionQuality?.failedVisualRegions ?? 0;
+document.extractionQuality.pendingOcrPages = result.visualMap?.summary?.pendingOcrPages || result.extractionQuality?.pendingOcrPages || 0;
+document.extractionQuality.ocrPages = result.visualMap?.summary?.ocrPages || result.extractionQuality?.ocrPages || result.stats?.ocr?.pagesProcessed || 0;
+document.extractionQuality.pageStatusCounts = result.extractionQuality?.pageStatusCounts || {};
+document.extractionQuality.unresolvedPages = Number(result.extractionQuality?.unresolvedPages || 0);
+document.extractionQuality.pageCount = Number(result.visualMap?.pageCount || result.pageCount || 0);
+document.extractionQuality.pagesAnalyzed = Number(result.visualMap?.pagesAnalyzed || 0);
+document.extractionQuality.reviewPages = Number(
+  result.extractionQuality?.reviewPages
+  ?? result.visualMap?.summary?.ocrReviewPages
+  ?? document.extractionQuality.pageStatusCounts.ocr_review_required
+  ?? 0
+);
+document.extractionQuality.ocrReviewRegions = Number(
+  result.extractionQuality?.ocrReviewRegions
+  ?? result.visualMap?.summary?.ocrReviewRegions
+  ?? 0
+);
+document.extractionQuality.ocrReviewRegionRefs = (result.visualMap?.pages || []).flatMap((page) =>
+  (page.ocrReviewRegions || []).map((region) => ({
+    page: Number(page.page),
+    id: region.id || "",
+    bbox: Array.isArray(region.bbox) ? region.bbox : null,
+    reason: region.reason || region.candidateReason || "",
+    status: region.status || ""
+  }))
+);
+// `partial` describes an incomplete page window. OCR review regions and visual
+// fallbacks can require human review after every page has been processed, but
+// they must not make the report tell the user to resume pages that do not exist.
+document.extractionQuality.partial ||= document.extractionQuality.failedVisualRegions > 0
+  || document.extractionQuality.pendingOcrPages > 0 || document.extractionQuality.unresolvedPages > 0;
 document.extractionQuality.visualContentStatus = pdfVisualArtifacts?.status;
+if (document.sourceType === "pdf") {
+ document.extractionQuality.continuationDecisions = [
+  ...reflowPdfTables(result.markdown, result.visualMap).decisions,
+  ...reflowPdfParagraphs(result.markdown, result.visualMap).decisions
+ ];
+ document.extractionQuality.readingOrderConflicts = (result.visualMap?.pages || [])
+  .filter(page => page.readingOrder?.conflict).map(page => page.page);
+}
 const qualityReport = await createQualityReport(
 workspacePath,
 document.id,
@@ -680,6 +825,34 @@ visualMap: pdfVisualArtifacts?.visualMapPath,
 visualAssetsIndex: pdfVisualArtifacts?.visualAssetsIndexPath,
 visualSummary: pdfVisualArtifacts?.summary
 };
+if (userEdited && currentVersionSnapshot) {
+ document.refreshedQualityReportId = qualityReport.id;
+ document.refreshedQuality = structuredClone(quality);
+ document.refreshedExtractionQuality = structuredClone(document.extractionQuality);
+ document.refreshedExtractorName = extractorName;
+ document.refreshedExtractionConverterName = converter.name;
+ document.refreshedExtractionConverterVersion = String(converter.cacheVersion || "1");
+ document.refreshedMarkdownOutputs = structuredClone(document.markdownOutputs);
+ document.quality = currentVersionSnapshot.quality;
+ document.extractionQuality = currentVersionSnapshot.extractionQuality;
+ document.qualityReportId = currentVersionSnapshot.qualityReportId;
+ document.warnings = [...currentVersionSnapshot.warnings, ...warnings.filter((warning) => !currentVersionSnapshot.warnings.includes(warning))];
+ document.extractorName = currentVersionSnapshot.extractorName;
+ document.extractionConverterName = currentVersionSnapshot.extractionConverterName;
+ document.extractionConverterVersion = currentVersionSnapshot.extractionConverterVersion;
+ document.refreshedPdfVisualMapPath = document.pdfVisualMapPath || "";
+ document.refreshedPdfVisualAssetsIndexPath = document.pdfVisualAssetsIndexPath || "";
+ document.refreshedPdfRichAssetsPath = document.pdfRichAssetsPath || "";
+ document.refreshedPdfDiagnosticsPath = document.pdfDiagnosticsPath || "";
+ document.pdfVisualMapPath = currentVersionSnapshot.pdfVisualMapPath;
+ document.pdfVisualAssetsIndexPath = currentVersionSnapshot.pdfVisualAssetsIndexPath;
+ document.pdfRichAssetsPath = currentVersionSnapshot.pdfRichAssetsPath;
+ document.pdfDiagnosticsPath = currentVersionSnapshot.pdfDiagnosticsPath;
+ document.markdownOutputs = {
+  ...(currentVersionSnapshot.markdownOutputs || {}),
+  refreshed: structuredClone(document.refreshedMarkdownOutputs)
+ };
+}
 if (document.sourceType === "pdf") {
 const sourceHash = await hashFile(document.sourcePath);
 const statRes = await stat(document.sourcePath);
@@ -702,11 +875,148 @@ visualAssetsIndexPath: pdfVisualArtifacts.visualAssetsIndexPath,
 summary: pdfVisualArtifacts.summary
 } : null
 };
-const pdfDiagnosticsPath = await writePdfDiagnostics(workspacePath, document.id, diagData);
-document.pdfDiagnosticsPath = pdfDiagnosticsPath;
+const pdfDiagnosticsPath = path.join(outputRoot, "pdf-diagnostics.json");
+await writeFile(pdfDiagnosticsPath, JSON.stringify(diagData, null, 2), "utf8");
+if (userEdited) document.refreshedPdfDiagnosticsPath = pdfDiagnosticsPath;
+else document.pdfDiagnosticsPath = pdfDiagnosticsPath;
+try {
+const documentIr = buildPdfDocumentIr({
+documentId: document.id,
+ revisionId: extractionRevisionId({ sourceHash, converter, extractorName, markdown: result.markdown, pageLedger: result.pageLedger, visualMap: result.visualMap, options }),
+sourcePath: document.sourcePath,
+sourceHash,
+sourceSize: statRes.size,
+ pageCount: result.pageCount || result.stats?.ocr?.pageCount || null,
+ pageLedger: result.pageLedger || null,
+extractorName: extractorName,
+extractorVersion: String(converter.cacheVersion || "1"),
+markdown: result.markdown,
+visualMap: result.visualMap,
+warnings,
+lowReadableText: resolvedLowReadableText,
+quality: userEdited ? document.refreshedExtractionQuality : document.extractionQuality
+});
+const storedIr = await writeDocumentIr(workspacePath, documentIr);
+const irFields = {
+ documentIrSchema: documentIr.schema,
+ documentIrVersion: documentIr.version,
+ documentIrRevisionId: documentIr.revisionId,
+ documentIrPath: storedIr.indexPath,
+ documentIrPageCount: storedIr.pageCount,
+ documentIrBlockCount: storedIr.blockCount,
+ documentIrSourceHash: sourceHash,
+ documentIrMarkdownHash: `sha256:${computeBufferHash(Buffer.from(result.markdown, "utf8"))}`
+};
+if (userEdited) {
+ Object.assign(document, Object.fromEntries(Object.entries(irFields).map(([key, value]) => [`refreshed${key[0].toUpperCase()}${key.slice(1)}`, value])));
+} else {
+ Object.assign(document, irFields);
 }
+ if (typeof options.updateCheckpointPage === "function") {
+  for (const page of documentIr.pages) {
+   const pageArtifact = storedIr.pages?.find((entry) => entry.id === page.id);
+   await options.updateCheckpointPage({
+    pageNumber: page.pageNumber,
+    status: page.status,
+    artifactPath: pageArtifact?.relativePath || "",
+    contentHash: pageArtifact?.contentHash || "",
+    error: page.warnings?.join("; ") || ""
+   }).catch(() => {});
+ }
+}
+} catch (error) {
+throw new AppError("document_revision_failed", `Structured representation could not be stored: ${error.message}`);
+}
+} else if (["docx", "pptx", "txt", "md"].includes(document.sourceType)) {
+try {
+const sourceHash = await hashFile(document.sourcePath);
+const statRes = await stat(document.sourcePath);
+const documentIr = buildDocumentIr({
+documentId: document.id,
+ revisionId: extractionRevisionId({ sourceHash, converter, extractorName, markdown: result.markdown, pageLedger: result.pageLedger, visualMap: result.visualMap, options }),
+sourcePath: document.sourcePath,
+sourceType: document.sourceType,
+sourceHash,
+sourceSize: statRes.size,
+title: document.title,
+extractorName,
+extractorVersion: document.extractionConverterVersion,
+markdown: result.markdown,
+warnings,
+quality: userEdited ? document.refreshedExtractionQuality : document.extractionQuality
+});
+const storedIr = await writeDocumentIr(workspacePath, documentIr);
+const irFields = {
+ documentIrSchema: documentIr.schema,
+ documentIrVersion: documentIr.version,
+ documentIrRevisionId: documentIr.revisionId,
+ documentIrPath: storedIr.indexPath,
+ documentIrPageCount: storedIr.pageCount,
+ documentIrBlockCount: storedIr.blockCount,
+ documentIrSourceHash: sourceHash,
+ documentIrMarkdownHash: `sha256:${computeBufferHash(Buffer.from(result.markdown, "utf8"))}`
+};
+if (userEdited) {
+ Object.assign(document, Object.fromEntries(Object.entries(irFields).map(([key, value]) => [`refreshed${key[0].toUpperCase()}${key.slice(1)}`, value])));
+} else {
+ Object.assign(document, irFields);
+}
+} catch (error) {
+throw new AppError("document_revision_failed", `Structured representation could not be stored: ${error.message}`);
+}
+}
+await options.assertNotCancelled?.();
 document.error = undefined;
-await writeManifest(workspacePath, manifest);
+const artifactFiles = [];
+for (const entry of await readdir(outputRoot, { recursive: true, withFileTypes: true })) {
+ if (!entry.isFile()) continue;
+ const absolute = path.join(entry.parentPath, entry.name);
+ artifactFiles.push({ path: path.relative(outputRoot, absolute).split(path.sep).join("/"), hash: await hashFile(absolute) });
+}
+const revisionPath = path.join(outputRoot, "revision.json");
+await writeFile(revisionPath, JSON.stringify({ schema: "schema-docs.conversion-revision.v1", revision,
+ documentId, sourceHash: revisionSourceHash, markdownPath: finalWritePath,
+ irPath: userEdited ? document.refreshedDocumentIrPath : document.documentIrPath,
+ qualityReportId: qualityReport.id, files: artifactFiles }, null, 2), "utf8");
+if (userEdited) {
+ document.refreshedArtifactRevisionId = revision;
+ document.refreshedArtifactRevisionPath = revisionPath;
+} else {
+ document.artifactRevisionId = revision;
+ document.artifactRevisionPath = revisionPath;
+}
+await writeManifest(workspacePath, manifest, { beforeCommit: async (next, latest) => {
+ const current = latest?.documents?.find(entry => entry.id === documentId);
+ const job = latest?.jobs?.find(entry => entry.id === options.jobId);
+ if (job?.status === "cancelled") throw new AppError("job_cancelled", job.cancelReason || "Job was cancelled.");
+ if (JSON.stringify(current) !== JSON.stringify(originalDocument)) {
+  throw new AppError("document_revision_conflict", "The document changed during conversion; its current revision was preserved.");
+ }
+ if (current.outputMarkdownPath && await readFile(current.outputMarkdownPath, "utf8") !== existingContent) {
+  throw new AppError("document_revision_conflict", "Markdown was edited during conversion; the edits were preserved.");
+ }
+ if (await hashFile(document.sourcePath) !== revisionSourceHash) {
+  throw new AppError("document_revision_conflict", "Source changed during conversion; retry with the new source.");
+ }
+ const mergedJobs = next.jobs;
+ Object.assign(next, latest, { jobs: mergedJobs, updatedAt: next.updatedAt });
+ next.documents = latest.documents.map(entry => entry.id === documentId ? document : entry);
+ // Candidate versions are provisional until this lock is held. A manual save
+ // may have allocated the same number while extraction was running.
+ next.markdownVersions = [...(latest.markdownVersions || [])];
+ const versionIds = new Set(next.markdownVersions.map(entry => entry.id));
+ for (const entry of manifest.markdownVersions || []) {
+  if (versionIds.has(entry.id)) continue;
+  const number = Math.max(0, ...next.markdownVersions.filter(item => item.path === entry.path).map(item => item.version)) + 1;
+  next.markdownVersions.push({ ...entry, version: number });
+  versionIds.add(entry.id);
+ }
+ const committingJob = next.jobs?.find(entry => entry.id === options.jobId);
+ if (committingJob) {
+  committingJob.commitCompletedAt = new Date().toISOString();
+  committingJob.output = { documentId, outputMarkdownPath: document.outputMarkdownPath, artifactRevisionId: revision };
+ }
+} });
 const capability = markdownExtractionCapability(document.sourceType);
 const evidence = await appendEvidenceRecord(workspacePath, {
 kind: "document_extraction",
@@ -760,9 +1070,24 @@ workspacePath,
 jobType,
 {
 documentId,
-converter: converter.name
+converter: converter.name,
+checkpoint: options.checkpoint === false ? undefined : {
+ defer: true,
+ documentId,
+ pipelineVersion: String(converter.cacheVersion || "1"),
+  options: {
+  converter: converter.name,
+  preferredExtractor: options.preferredExtractor || "",
+    pythonPath: options.pythonPath || "",
+    layoutStartPage: options.layoutStartPage ?? null,
+    layoutMaxPages: options.layoutMaxPages ?? null,
+  force: options.force === true,
+  maxDecompressedBytes: options.maxDecompressedBytes ?? null,
+  maxInputBytes: options.maxInputBytes ?? null
+ }
+}
 },
-async ({ update }) => {
+async ({ job, update, startCheckpoint, updateCheckpoint, updateCheckpointPage, assertNotCancelled }) => {
 await update({
 progress: 15,
 message: "Checking existing extraction"
@@ -778,10 +1103,28 @@ documentId,
 converter: converter.name
 });
 }
+if (startCheckpoint) {
+ await startCheckpoint({
+  sourceHash: await hashFile(document.sourcePath),
+  options: {
+   converter: converter.name,
+   preferredExtractor: options.preferredExtractor || "",
+   pythonPath: options.pythonPath || "",
+   layoutStartPage: options.layoutStartPage ?? null,
+   layoutMaxPages: options.layoutMaxPages ?? null,
+   force: options.force === true,
+   maxDecompressedBytes: options.maxDecompressedBytes ?? null,
+   maxInputBytes: options.maxInputBytes ?? null
+  }
+ });
+ await updateCheckpoint?.({ stages: { source_validation: { status: "completed", updatedAt: new Date().toISOString() } } });
+}
+await assertNotCancelled?.();
 if (!options.force) {
 const cached = await reusableMarkdownExtraction(document, converter);
 if (cached) {
-await update({
+  await updateCheckpoint?.({ stages: { markdown_extraction: { status: "reused", updatedAt: new Date().toISOString() } } });
+  await update({
 progress: 95,
 message: "Reused existing Markdown extraction"
 });
@@ -792,17 +1135,41 @@ await update({
 progress: 25,
 message: "Converting document"
 });
+await updateCheckpoint?.({ stages: { markdown_extraction: { status: "running", updatedAt: new Date().toISOString() } } });
+await assertNotCancelled?.();
 const result = await convertDocumentToMarkdown(workspacePath, documentId, converter, {
+...options,
+jobId: job.id,
 update,
-preferredExtractor: options.preferredExtractor,
-force: options.force === true
+updateCheckpointPage,
+assertNotCancelled,
+checkpoint: options.checkpoint,
+  preferredExtractor: options.preferredExtractor,
+  pythonPath: options.pythonPath,
+  layoutStartPage: options.layoutStartPage,
+  layoutMaxPages: options.layoutMaxPages,
+  force: options.force === true,
+ ocrLanguages: options.ocrLanguages,
+ maxDecompressedBytes: options.maxDecompressedBytes,
+ maxInputBytes: options.maxInputBytes
 });
+await assertNotCancelled?.();
+await updateCheckpoint?.({ stages: {
+ markdown_extraction: {
+  status: "completed",
+  artifactPath: result.document.outputMarkdownPath || "",
+  qualityReportId: result.qualityReport?.id || "",
+  updatedAt: new Date().toISOString()
+ }
+} });
 await update({
 progress: 90,
 message: "Markdown written"
 });
 return {
 documentId: result.document.id,
+cached: false,
+conversionMode: "fresh",
 outputMarkdownPath: result.document.outputMarkdownPath,
 readableMarkdownPath: result.document.readableMarkdownPath,
 markdownOutputs: result.document.markdownOutputs,

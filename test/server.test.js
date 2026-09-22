@@ -103,22 +103,29 @@ test("workspace image assets cannot escape through a symlink", async (t) => {
     const token = await getToken(baseUrl);
     const url = new URL(`${baseUrl}/api/workspace-asset`);
     url.searchParams.set("workspacePath", workspace);
-    url.searchParams.set("markdownPath", "notes/note.md");
     url.searchParams.set("assetPath", "../linked/secret.png");
     url.searchParams.set("token", token);
-    assert.equal((await fetch(url)).status, 404);
+    for (const markdownPath of ["notes/note.md", path.join(workspace, "notes", "note.md")]) {
+      url.searchParams.set("markdownPath", markdownPath);
+      assert.equal((await fetch(url)).status, 404);
+    }
   });
 });
 test("serves adjacent assets for an explicitly opened external Markdown file", async () => {
   const activeWorkspace = await mkdtemp(path.join(os.tmpdir(), "schema-docs-active-workspace-"));
   const externalDir = await mkdtemp(path.join(os.tmpdir(), "schema-docs-external-note-"));
-  const markdownPath = path.join(externalDir, "report.md");
-  const assetDir = path.join(externalDir, "report.assets");
+  const noteDir = path.join(externalDir, "notes");
+  const markdownPath = path.join(noteDir, "report.md");
+  const assetDir = path.join(noteDir, "report.assets");
   const imagePath = path.join(assetDir, "formula.png");
-  await mkdir(assetDir);
+  const activeWorkspaceImage = path.join(activeWorkspace, "workspace.png");
+  await mkdir(assetDir, { recursive: true });
   await writeFile(markdownPath, "![Formula](<./report.assets/formula.png>)");
   const image = Buffer.from("89504e470d0a1a0a", "hex");
   await writeFile(imagePath, image);
+  await writeFile(path.join(externalDir, "outside.png"), image);
+  await writeFile(activeWorkspaceImage, image);
+  await mkdir(path.join(noteDir, "fake.md"));
   await withServer(async (baseUrl) => {
     const token = await getToken(baseUrl);
     const url = new URL(`${baseUrl}/api/workspace-asset`);
@@ -131,6 +138,40 @@ test("serves adjacent assets for an explicitly opened external Markdown file", a
     assert.deepEqual(Buffer.from(await response.arrayBuffer()), image);
     url.searchParams.set("assetPath", "../outside.png");
     assert.equal((await fetch(url)).status, 404);
+    url.searchParams.set("assetPath", activeWorkspaceImage);
+    assert.equal((await fetch(url)).status, 404);
+    url.searchParams.set("markdownPath", path.join(noteDir, "fake.md"));
+    url.searchParams.set("assetPath", "./report.assets/formula.png");
+    assert.equal((await fetch(url)).status, 404);
+  });
+});
+test("serves parent assets for an absolute Markdown path inside the active workspace", async () => {
+  const workspace = await mkdtemp(path.join(os.tmpdir(), "schema-docs-absolute-workspace-note-中文 & "));
+  const outside = await mkdtemp(path.join(os.tmpdir(), "schema-docs-absolute-workspace-outside-"));
+  const markdownPath = path.join(workspace, "outputs", "readable", "数学 deep.readable_1.md");
+  const imagePath = path.join(workspace, "outputs", "assets", "数学 deep.pdf", "page-21-formula.png");
+  const outsideImage = path.join(outside, "exists.png");
+  await mkdir(path.dirname(markdownPath), { recursive: true });
+  await mkdir(path.dirname(imagePath), { recursive: true });
+  await writeFile(markdownPath, "![Formula](<../assets/math.pdf/page-21-formula.png>)");
+  const image = Buffer.from("89504e470d0a1a0a", "hex");
+  await writeFile(imagePath, image);
+  await writeFile(outsideImage, image);
+  const openedMarkdownPaths = [...new Set([markdownPath, path.toNamespacedPath(markdownPath)])];
+  await withServer(async (baseUrl) => {
+    const token = await getToken(baseUrl);
+    const url = new URL(`${baseUrl}/api/workspace-asset`);
+    url.searchParams.set("workspacePath", workspace);
+    url.searchParams.set("token", token);
+    for (const openedMarkdownPath of openedMarkdownPaths) {
+      url.searchParams.set("markdownPath", openedMarkdownPath);
+      url.searchParams.set("assetPath", "../assets/数学 deep.pdf/page-21-formula.png");
+      const response = await fetch(url);
+      assert.equal(response.status, 200);
+      assert.deepEqual(Buffer.from(await response.arrayBuffer()), image);
+      url.searchParams.set("assetPath", outsideImage);
+      assert.equal((await fetch(url)).status, 404);
+    }
   });
 });
 test("allows desktop local app config reads from tauri localhost", async () => {
@@ -491,11 +532,12 @@ test("serves inbox, timeline, versioning, settings, explain-package, and real-sa
 
     const convertRes = await post(baseUrl, "/api/document/convert", { workspacePath, documentId: docRecordId });
     assert.equal(convertRes.ok, true);
-    const versions = await getJson(baseUrl, "/api/versions", { workspacePath, relativePath: "outputs/test-doc.md" });
+    const markdownPath = path.relative(workspacePath, convertRes.data.output.outputMarkdownPath).split(path.sep).join("/");
+    const versions = await getJson(baseUrl, "/api/versions", { workspacePath, relativePath: markdownPath });
     assert.equal(versions.ok, true);
     assert.ok(versions.data.length > 0);
     const verId = versions.data[0].id;
-    const promoteRes = await post(baseUrl, "/api/versions/promote", { workspacePath, relativePath: "outputs/test-doc.md", versionId: verId });
+    const promoteRes = await post(baseUrl, "/api/versions/promote", { workspacePath, relativePath: markdownPath, versionId: verId });
     assert.equal(promoteRes.ok, true);
     await writeFile(path.join(workspacePath, "diff-a.md"), "Line 1\nLine 2", "utf8");
     await writeFile(path.join(workspacePath, "diff-b.md"), "Line 1\nLine 3", "utf8");

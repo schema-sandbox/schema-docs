@@ -1,3 +1,5 @@
+import { pdfPageFlowContext } from "../processing/pageNoise.js";
+import { reflowPdfTables } from "../processing/tableStructure.js";
 const metadataLinePattern = /^>\s*(Source|Converted by|Extractor|Extraction quality|Source format|Human-readable Markdown view\.?):\s*/i;
 function isProcessMetadataLine(line) {
   const trimmed = String(line || "").trim();
@@ -10,6 +12,35 @@ function stripProcessMetadataLines(lines) {
 const defaultReadableSegmentCharacterLimit = 120000;
 function normalizeLineEndings(markdown) {
 return String(markdown ?? "").replace(/\r\n?/g, "\n");
+}
+
+const generatedPdfInlineImageLinePattern = /^\+[ \t]{5,}(!\[Inline formula preserved from PDF page \d+\]\(<(?:\.\.\/)?assets\/[^>\r\n]+\.pdf\/page-\d+-formula-\d+(?:-[a-f0-9]+)?\.(?:png|jpe?g)>\))\+([ \t]*)$/i;
+
+/**
+ * Repairs a legacy PDF-extraction edge case where a line-leading arithmetic
+ * operator plus wide layout spacing makes CommonMark parse the generated
+ * inline formula image as list-item code. The rule is intentionally limited
+ * to generated PDF asset labels and skips fenced or indented code.
+ */
+export function normalizeGeneratedPdfInlineImageLines(markdown) {
+  const parts = String(markdown ?? "").split(/(\r\n|\n|\r)/);
+  let fence = null;
+  for (let index = 0; index < parts.length; index += 2) {
+    const line = parts[index];
+    if (fence) {
+      const closing = line.match(/^[ \t]{0,3}(`{3,}|~{3,})[ \t]*$/);
+      if (closing && closing[1][0] === fence.marker && closing[1].length >= fence.length) fence = null;
+      continue;
+    }
+    const opening = line.match(/^[ \t]{0,3}(`{3,}|~{3,})/);
+    if (opening) {
+      fence = { marker: opening[1][0], length: opening[1].length };
+      continue;
+    }
+    if (/^[ \t]/.test(line)) continue;
+    parts[index] = line.replace(generatedPdfInlineImageLinePattern, "+$1+$2");
+  }
+  return parts.join("");
 }
 function isHeading(line) {
  const match = line.match(/^#{1,6}\s+(.+)$/);
@@ -65,23 +96,33 @@ function repeatNoiseKey(line) {
     .toLowerCase()
     .replace(/\bpage\s+\d{1,5}\s*(of|\/)\s*\d{1,5}\b/g, "page #")
     .replace(/\bpage\s+\d{1,5}\b/g, "page #")
-    .replace(/\b\d{1,5}\s*(of|\/)\s*\d{1,5}\b/g, "#")
-    .replace(/\b\d{1,5}\b/g, "#")
     .replace(/\s+/g, " ")
     .trim();
 }
 function removeRepeatedShortLines(lines) {
   const counts = new Map();
+  const pageMarker = /^<!--\s*pdf-page:\s*(\d+)(?:\s*;[^>]*)?\s*-->$/;
+  const paged = lines.some(line => pageMarker.test(line.trim()));
+  const seen = new Set(), repeatedWithinPage = new Set();
+  let page = null;
   for (const line of lines) {
+    const marker = paged && line.trim().match(pageMarker);
+    if (marker) { page = marker[1]; continue; }
     const key = repeatNoiseKey(line);
-    if (key) {
+    if (key && (!paged || page !== null)) {
+      // Similar numbered body lines on one physical page are not evidence of
+      // a recurring header. Count distinct pages and retain such body content.
+      // Numeric similarity may protect body text, but must never justify removal.
+      const family = key.replace(/\b\d{1,5}\b/g, "#"), occurrence = `${page}:${family}`;
+      if (paged && seen.has(occurrence)) { repeatedWithinPage.add(family); continue; }
+      if (paged) seen.add(occurrence);
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
   }
   const threshold = Math.max(4, Math.floor(lines.length / 90));
   return lines.filter((line) => {
     const key = repeatNoiseKey(line);
-    return !key || (counts.get(key) ?? 0) < threshold;
+    return !key || repeatedWithinPage.has(key.replace(/\b\d{1,5}\b/g, "#")) || (counts.get(key) ?? 0) < threshold;
   });
 }
 function isSetextUnderline(line) {
@@ -187,7 +228,7 @@ function shouldJoinParagraph(previous, current) {
   }
   return prev.length < 120 || next.length < 120;
 }
-function cleanupParagraphs(lines) {
+function cleanupParagraphs(lines, sourceMargins = false) {
   const blocks = [];
   let inCodeFence = false;
   for (const rawLine of lines) {
@@ -202,7 +243,7 @@ function cleanupParagraphs(lines) {
       blocks.push(line);
       continue;
     }
-    if (isLikelyPageNoise(trimmed)) {
+    if (!sourceMargins && isLikelyPageNoise(trimmed)) {
       continue;
     }
     const previous = blocks[blocks.length - 1] ?? "";
@@ -253,16 +294,68 @@ return `${"  ".repeat(Math.max(0, level - 1))}- ${title}`;
 if (headings.length < 3) return [];
 return ["## Contents", "", ...headings, ""];
 }
+export function reflowPdfParagraphs(markdown, visualMap) {
+  const {lines,pages,byNumber,ignored,furniture} = pdfPageFlowContext(markdown,visualMap);
+  const links=[], decisions=[], roots=new Map(), replacements=new Map(), removed=new Set(ignored);
+  const sourceWords = new Set(String(markdown).match(/[A-Za-z]{3,}/g)?.map(word=>word.toLowerCase()) || []);
+  for(let i=1;i<pages.length;i++) {
+    const a=pages[i-1],b=pages[i],left=byNumber.get(a.number),right=byNumber.get(b.number);
+    const edge = (meta,page,side) => {
+      const candidate=meta?.paragraphEdges?.[side], index=side==="first"?page.first:page.last;
+      if(candidate?.text===lines[index]?.trim()) return candidate;
+      if(!furniture.some(f=>f.sourceRefs[0].pageNumber===page.number)) return null;
+      return meta?.paragraphEdges?.[side==="first"?"leading":"trailing"]?.find(e=>e.text===lines[index]?.trim());
+    };
+    const tail=edge(left,a,"last"),head=edge(right,b,"first");
+    if(b.number!==a.number+1 || a.last===null || b.first===null || !tail || !head
+      || left.requiresOcr || right.requiresOcr || left.ocr || right.ocr || a.code.has(a.last) || b.code.has(b.first)) continue;
+    const t=lines[a.last].trim(),h=lines[b.first].trim();
+    const cjkTail=/[\u3400-\u9fff]$/u.test(t), cjkHead=/^[\u3400-\u9fff]/u.test(h);
+    // A discretionary hyphen or an independently occurring full word supplies
+    // evidence. Letter casing alone cannot distinguish evidence-based from a split word.
+    const split = /(?:^|\s)([A-Za-z]{2,})([-\u00ad])$/.exec(t);
+    const following = /^([a-z]+)\b/.exec(h);
+    const hyphenJoin = Boolean(split && following && (split[2] === "\u00ad"
+      || sourceWords.has((split[1]+following[1]).toLowerCase())));
+    if (split && following && !hyphenJoin) decisions.push({status:"candidate",reason:"ambiguous_hyphen",fromPage:a.number,toPage:b.number,
+      sourceRefs:[{kind:"pdf",pageNumber:a.number,lineNumber:a.last+1,bbox:tail.bbox},{kind:"pdf",pageNumber:b.number,lineNumber:b.first+1,bbox:head.bbox}]});
+    const naturalHead=/^\p{Ll}/u.test(h) || cjkHead;
+    const naturalTail=/[\p{L},]$/u.test(t) || cjkTail || hyphenJoin;
+    const minimumTailLength=cjkTail ? 16 : 40, minimumHeadLength=cjkHead ? 12 : 20;
+    if(t!==tail.text || h!==head.text || t.length<minimumTailLength || h.length<minimumHeadLength || !naturalTail || !naturalHead
+      || /[#$|<>\\[\]{}*\x60]/.test(t+h) || /^(?:[-*+]\s|\d+[.)]\s)/.test(t)
+      || /^#{1,6}\s/.test(t) || /^#{1,6}\s/.test(h)) continue;
+    if(![tail.bbox,head.bbox].every(b=>Array.isArray(b) && b.length===4)
+      || ![...tail.bbox,...head.bbox,tail.fontSize,head.fontSize,left.height,right.height].every(Number.isFinite)
+      || tail.fontSize<=0 || Math.abs(tail.fontSize-head.fontSize)>tail.fontSize*.1
+      || Math.abs((tail.bbox[0]-(left.coordinateOrigin?.[0]||0))-(head.bbox[0]-(right.coordinateOrigin?.[0]||0)))>Math.max(4,tail.fontSize*.5)
+      || tail.bbox[3]-(left.coordinateOrigin?.[1]||0)<left.height*.75
+      || head.bbox[1]-(right.coordinateOrigin?.[1]||0)>right.height*.2) continue;
+    const root=roots.get(a.last) ?? a.last;
+    const joinKind=hyphenJoin ? "hyphenated_word" : cjkTail && cjkHead ? "cjk_continuation" : "latin_continuation";
+    const leftText=(replacements.get(root) ?? lines[root]).trimEnd();
+    const joined=hyphenJoin ? `${leftText.slice(0,-1)}${h}` : cjkTail && cjkHead ? `${leftText}${h}` : `${leftText} ${h}`;
+    replacements.set(root,joined);
+    roots.set(b.first,root);removed.add(b.first);
+    links.push({fromPage:a.number,toPage:b.number,fromLine:a.last+1,toLine:b.first+1,confidence:"medium",status:"accepted",joinKind,
+      evidence:hyphenJoin ? [split[2] === "\u00ad" ? "source_soft_hyphen" : "independent_source_word"] : ["aligned_body_edges","compatible_font","open_sentence"],
+      sourceRefs:[{kind:"pdf",pageNumber:a.number,bbox:tail.bbox},{kind:"pdf",pageNumber:b.number,bbox:head.bbox}]});
+  }
+  return {markdown:lines.map((line,i)=>removed.has(i)?"":replacements.get(i) ?? line).join("\n"),links,decisions:[...decisions,...links],furniture};
+}
+
 export function createReadableMarkdown(markdown, options = {}) {
 const sourceFormat = options.sourceType || "document";
 const sourceName = options.sourceName || "source";
-const inputLines = normalizeLineEndings(markdown)
+const inputLines = normalizeLineEndings(sourceFormat === "pdf" ? reflowPdfTables(reflowPdfParagraphs(markdown, options.visualMap).markdown, options.visualMap).markdown : markdown)
 .split("\n")
 .map((line) => line.replace(/\t/g, "  "));
 const cleanedSourceLines = stripProcessMetadataLines(inputLines);
+const structuralLines = splitTableOfContentsLines(promoteSetextHeadings(cleanedSourceLines));
+const sourceMargins = sourceFormat === "pdf" && options.visualMap?.pages?.some(p=>Array.isArray(p.paragraphEdges?.margins));
 const cleaned = sourceFormat === "md"
 ? collapseBlankLines(cleanedSourceLines)
-: collapseBlankLines(cleanupParagraphs(removeRepeatedShortLines(splitTableOfContentsLines(promoteSetextHeadings(cleanedSourceLines)))));
+: collapseBlankLines(cleanupParagraphs(sourceMargins ? structuralLines : removeRepeatedShortLines(structuralLines), sourceMargins));
 const hasTitle = cleaned.some((line) => /^#\s+\S/.test(line));
 const title = hasTitle ? [] : [`# ${sourceName}`, ""];
 const body = [...title, ...cleaned];
@@ -375,7 +468,7 @@ const body = [
 `> Source line range: ${segment.startLine}-${segment.endLine}`,
 "",
 ...segmentLines
-].join("\n").trimEnd() + "\n";
+].join("\n") + "\n";
 return {
 index: index + 1,
 title,

@@ -223,30 +223,34 @@ test("keeps self-closing blank cells separate from following shared-string cells
   const preview = worksheetXmlToPreview(sheetXml, sharedStrings);
   assert.deepEqual(preview.previewRows[0], { Label: "", Text: "QB" });
 });
-test("reads every self-closing worksheet relationship in workbook order", async () => {
-  const workspace = await tempDir("lft-multi-sheet-xlsx-");
-  const xlsxPath = path.join(workspace, "multi-sheet.xlsx");
-  const workbookXml = `<workbook><sheets>
+test("reads every self-closing worksheet relationship in workbook order", async (t) => {
+  for (const targetPrefix of ["", "/xl/", "xl/"]) {
+    await t.test(`worksheet target prefix: ${targetPrefix || "relative"}`, async () => {
+      const workspace = await tempDir("lft-multi-sheet-xlsx-");
+      const xlsxPath = path.join(workspace, "multi-sheet.xlsx");
+      const workbookXml = `<workbook><sheets>
     <sheet name="Cooperation" sheetId="2" r:id="rId1"/>
     <sheet name="First-Mover" sheetId="4" r:id="rId4"/>
   </sheets></workbook>`;
-  const relsXml = `<Relationships>
-    <Relationship Id="rId4" Target="worksheets/sheet4.xml"/>
-    <Relationship Id="rId1" Target="worksheets/sheet1.xml"/>
+      const relsXml = `<Relationships>
+    <Relationship Id="rId4" Target="${targetPrefix}worksheets/sheet4.xml"/>
+    <Relationship Id="rId1" Target="${targetPrefix}worksheets/sheet1.xml"/>
   </Relationships>`;
-  const makeSheet = (heading, value) => `<worksheet><sheetData>
+      const makeSheet = (heading, value) => `<worksheet><sheetData>
     <row r="1"><c r="A1" t="inlineStr"><is><t>${heading}</t></is></c><c r="B1" t="inlineStr"><is><t>Value</t></is></c></row>
     <row r="2"><c r="A2" t="inlineStr"><is><t>row</t></is></c><c r="B2"><v>${value}</v></c></row>
   </sheetData></worksheet>`;
-  await writeFile(xlsxPath, buildZip([
-    { name: "xl/workbook.xml", content: workbookXml },
-    { name: "xl/_rels/workbook.xml.rels", content: relsXml },
-    { name: "xl/worksheets/sheet1.xml", content: makeSheet("Q", 1) },
-    { name: "xl/worksheets/sheet4.xml", content: makeSheet("Matrix", 4) }
-  ]));
-  const imported = await xlsxImporter.import({ sourcePath: xlsxPath });
-  assert.deepEqual(imported.sheets.map((sheet) => sheet.name), ["Cooperation", "First-Mover"]);
-  assert.deepEqual(imported.sheets.map((sheet) => sheet.previewRows[0].Value), ["1", "4"]);
+      await writeFile(xlsxPath, buildZip([
+        { name: "xl/workbook.xml", content: workbookXml },
+        { name: "xl/_rels/workbook.xml.rels", content: relsXml },
+        { name: "xl/worksheets/sheet1.xml", content: makeSheet("Q", 1) },
+        { name: "xl/worksheets/sheet4.xml", content: makeSheet("Matrix", 4) }
+      ]));
+      const imported = await xlsxImporter.import({ sourcePath: xlsxPath });
+      assert.deepEqual(imported.sheets.map((sheet) => sheet.name), ["Cooperation", "First-Mover"]);
+      assert.deepEqual(imported.sheets.map((sheet) => sheet.previewRows[0].Value), ["1", "4"]);
+    });
+  }
 });
 test("inspects generated xlsx through dataset job flow", async () => {
   const workspace = await tempDir("lft-xlsx-");
@@ -604,8 +608,9 @@ test("safe Markdown backup, refreshImportSource, detectSourceChanges and quality
   const reconvertJob = await service.convertDocument(record.id);
   assert.equal(reconvertJob.status, "succeeded");
   assert.ok(reconvertJob.output.warnings.some(w => w.includes("Local Markdown edits were detected")));
-  const files = await fs.readdir(path.join(workspace, "outputs"));
-  assert.ok(files.some(f => f.includes(".refreshed.md")));
+  const refreshedDoc = (await service.getManifest()).documents.find(d => d.id === record.id);
+  assert.ok(refreshedDoc.refreshedMarkdownPath.endsWith(".refreshed.md"));
+  assert.ok((await fs.readFile(refreshedDoc.refreshedMarkdownPath, "utf8")).includes("Hello world"));
   await writeFile(txtPath, "Hello world, updated contents.", "utf8");
   const updates = await service.detectSourceChanges();
   const updatedUpdate = updates.find(u => u.id === record.id);
@@ -643,6 +648,7 @@ test("external refresh registers previous Markdown under the primary version his
   assert.ok(refreshedVersions.length >= 3);
   assert.ok(refreshedVersions.some((version) => version.reason === "pre_refresh_backup" && version.path === relativeMdPath));
   assert.ok(refreshedVersions.every((version) => version.path === relativeMdPath));
+  assert.deepEqual(refreshedVersions.map(version => version.version), [1, 2, 3]);
 });
 test("real sample summary tracks product capability coverage", async () => {
   const workspace = await tempDir("lft-real-samples-");

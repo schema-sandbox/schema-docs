@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { prepareReleaseRuntime, stageReleaseRuntime } from "../scripts/prepare-release.js";
+import { verifyStagedRuntime } from "../src/core/runtimeIdentity.js";
 
 async function writeFixture(filePath, content) {
   await mkdir(path.dirname(filePath), { recursive: true });
@@ -33,5 +34,8 @@ test("prepareReleaseRuntime removes source Python caches and stale packaged runt
   assert.equal(await readFile(path.join(staged.runtimeDir, "src", "adapters", "module.py"), "utf8"), "print('ok')\n");
   assert.equal(await readFile(path.join(staged.runtimeDir, "public", "app.js"), "utf8"), "desktop-ui");
   assert.equal(await readFile(path.join(staged.runtimeDir, "node.exe"), "utf8"), "node-runtime");
+  await verifyStagedRuntime(staged.runtimeDir);
+  await writeFile(path.join(staged.runtimeDir, "src/adapters/module.py"), "print('tampered')");
+  await assert.rejects(verifyStagedRuntime(staged.runtimeDir), /differs/);
   await rm(root, { recursive: true, force: true });
 });

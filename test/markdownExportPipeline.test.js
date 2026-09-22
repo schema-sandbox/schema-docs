@@ -1,18 +1,47 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { deflateSync, inflateSync } from "node:zlib";
 import {
   exportMarkdownToDocx,
   exportMarkdownToHtml,
+  exportMarkdownToHtmlFile,
   exportMarkdownToPdf,
   resolveBrowserPdfTimeouts,
   sanitizeXmlText,
   waitForStablePdfFile
 } from "../src/core/markdownExportPipeline.js";
 import { readZipEntry } from "../src/core/zip.js";
+import { normalizeGeneratedPdfInlineImageLines } from "../src/core/readableMarkdown.js";
+import { writeRenderedDocument } from '../src/core/documentExports.js';
+
+test('export interruption preserves a prior output and a retry writes the complete artifact', async () => {
+  const root=await mkdtemp(path.join(os.tmpdir(),'schema-export-budget-'));
+  try {
+    const destination=path.join(root,'result.html'); await writeFile(destination,'previous');
+    await assert.rejects(writeRenderedDocument(root,'# New\n\nText','result.html','html',{
+      assertNotCancelled:()=>{throw Object.assign(new Error('cancelled'),{code:'job_cancelled'});}
+    }),{code:'job_cancelled'});
+    await assert.rejects(writeRenderedDocument(root,'# New','result.html','html',{maxResidentBytes:1}),{code:'resource_limit'});
+    assert.equal(await readFile(destination,'utf8'),'previous');
+    await writeRenderedDocument(root,'# New\n\nText','result.html','html');
+    assert.match(await readFile(destination,'utf8'),/<h1[^>]*>New/);
+  } finally {await rm(root,{recursive:true,force:true});}
+});
+
+test("Markdown export removes internal PDF page markers", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "schema-export-page-marker-"));
+  try {
+    await writeRenderedDocument(root, "# Report\n\n<!-- pdf-page: 1; extraction: native -->\n\nBody", "result.md", "md");
+    const output = await readFile(path.join(root, "result.md"), "utf8");
+    assert.doesNotMatch(output, /pdf-page:/i);
+    assert.match(output, /Body/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("Markdown Export Pipeline - Chinese paragraph and typography", async () => {
   const title = "\u6807\u9898";
@@ -147,6 +176,94 @@ test("Markdown Export Pipeline - HTML snapshot render check", async () => {
   assert.match(html, /img\{display:block;max-width:100%;width:auto;height:auto/);
   assert.match(html, /@page\{size:A4;margin:16mm 14mm\}/);
   assert.match(html, /max-height:240mm/);
+});
+
+test("Markdown Export Pipeline - streams self-contained HTML images without changing tables or formulas", async () => {
+  const baseDir = await mkdtemp(path.join(os.tmpdir(), "schema-docs-streamed-html-"));
+  const imagePath = path.join(baseDir, "visual.png");
+  const outputPath = path.join(baseDir, "streamed.html");
+  const onePixelPng = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/l4QW2QAAAABJRU5ErkJggg==", "base64");
+  // Extra bytes exercise base64 carry handling across several stream chunks.
+  const image = Buffer.concat([onePixelPng, Buffer.alloc(200003, 0x5a)]);
+  await writeFile(imagePath, image);
+  const markdown = [
+    "# Streamed export",
+    "",
+    "| Formula | Visual |",
+    "| --- | --- |",
+    "| $E=mc^2$ | ![First](visual.png) |",
+    "",
+    "![Second](visual.png)",
+    "",
+    "Literal collision token: `__schema_docs_9f43c4e1_stream_image_999__.invalid`",
+    "",
+    "![Remote](https://tracking.invalid/image.png)"
+  ].join("\n");
+  const metrics = await exportMarkdownToHtmlFile(markdown, outputPath, { baseDir, assetRoot: baseDir });
+  const html = await readFile(outputPath, "utf8");
+  assert.equal(metrics.uniqueImageCount, 1);
+  assert.equal(metrics.imageOccurrences, 2);
+  assert.equal(metrics.sourceImageBytes, image.length);
+  assert.equal(metrics.bytesWritten, Buffer.byteLength(html));
+  assert.equal((html.match(/data:image\/png;base64,/g) || []).length, 2);
+  assert.equal((html.match(new RegExp(image.toString("base64"), "g")) || []).length, 2);
+  assert.match(html, /<table>/);
+  assert.match(html, /class="katex-inline-math"/);
+  assert.match(html, /__schema_docs_9f43c4e1_stream_image_999__\.invalid/);
+  assert.match(html, /Image omitted from export: Remote/);
+  assert.doesNotMatch(html, /tracking\.invalid|schema_docs_stream_image_[a-f0-9]{32}_\d+__\.invalid/);
+});
+
+test("Markdown Export Pipeline - repairs generated PDF inline images hidden by legacy list indentation", async () => {
+  const baseDir = await mkdtemp(path.join(os.tmpdir(), "schema-docs-pdf-inline-html-"));
+  const assetDir = path.join(baseDir, "assets", "math-deep.pdf");
+  const imageName = "page-001780-formula-000-8d699c07.png";
+  const relativeImage = `assets/math-deep.pdf/${imageName}`;
+  const generatedImage = `![Inline formula preserved from PDF page 1780](<${relativeImage}>)`;
+  await mkdir(assetDir, { recursive: true });
+  await writeFile(
+    path.join(assetDir, imageName),
+    Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/l4QW2QAAAABJRU5ErkJggg==", "base64")
+  );
+  const markdown = `Before\n\n+                  ${generatedImage}+\n\nAfter`;
+  const outputPath = path.join(baseDir, "legacy-inline.html");
+  const metrics = await exportMarkdownToHtmlFile(markdown, outputPath, { baseDir, assetRoot: baseDir });
+  const html = await readFile(outputPath, "utf8");
+  assert.equal(metrics.imageOccurrences, 1);
+  assert.equal(metrics.uniqueImageCount, 1);
+  assert.equal((html.match(/<img src="data:image\/png;base64,/g) || []).length, 1);
+  assert.match(html, /<p>\+<img [^>]+>\+<\/p>/);
+  assert.doesNotMatch(html, /<pre><code>|schema_docs_stream_image_[a-f0-9]{32}_\d+__\.invalid/);
+});
+
+test("generated PDF inline image repair leaves code and unrelated Markdown unchanged", () => {
+  const generatedImage = "![Inline formula preserved from PDF page 1780](<assets/math-deep.pdf/page-001780-formula-000-8d699c07.png>)";
+  const legacyLine = "+                  " + generatedImage + "+";
+  assert.equal(normalizeGeneratedPdfInlineImageLines(legacyLine), `+${generatedImage}+`);
+  assert.equal(
+    normalizeGeneratedPdfInlineImageLines(`${legacyLine}  \r\nNext\r\n`),
+    `+${generatedImage}+  \r\nNext\r\n`
+  );
+  assert.equal(
+    normalizeGeneratedPdfInlineImageLines(`${legacyLine}\t\nNext\n`),
+    `+${generatedImage}+\t\nNext\n`
+  );
+  assert.equal(
+    normalizeGeneratedPdfInlineImageLines(`${legacyLine}\rNext\r`),
+    `+${generatedImage}+\rNext\r`
+  );
+  const source = [
+    "+    " + generatedImage + "+",
+    "    +                  " + generatedImage + "+",
+    "+                  ![user](image.png)+",
+    "```md",
+    "+                  " + generatedImage + "+",
+    "```",
+    "~~~",
+    "+                  " + generatedImage + "+",
+    "~~~"
+  ].join("\n");
+  assert.equal(normalizeGeneratedPdfInlineImageLines(source), source);
 });
 
 test("Markdown Export Pipeline - HTML export escapes active content and stays offline", async () => {
@@ -297,7 +414,7 @@ test("Markdown Export Pipeline - embeds local PDF visual assets in HTML and Word
 
 test("Markdown Export Pipeline - PDF smoke check fallback", async () => {
   const md = "# PDF Title\n\nPDF content.";
-  const pdfBuffer = await exportMarkdownToPdf(md);
+  const pdfBuffer = await exportMarkdownToPdf(md, { renderer: "native-test" });
   assert.ok(pdfBuffer instanceof Buffer);
   assert.match(pdfBuffer.toString("latin1"), /%PDF-1\.4/);
 });

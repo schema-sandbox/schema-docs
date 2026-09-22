@@ -1,17 +1,32 @@
 import { runInNewContext } from "node:vm";
-import { readFile, writeFile, stat, realpath, mkdtemp, rm } from "node:fs/promises";
+import { createReadStream, createWriteStream } from "node:fs";
+import { assertMemoryBudget } from "../adapters/pdfPageStream.js";
+
+export async function checkExportBudget(options = {}) {
+  await options.assertNotCancelled?.();
+  assertMemoryBudget(options.maxResidentBytes);
+  await options.onResourceSample?.({ sampledAt: Date.now(), nodeRssBytes: process.memoryUsage().rss, phase: 'export' });
+}
+import { readFile, writeFile, stat, realpath, mkdtemp, open, rm } from "node:fs/promises";
+import { once } from "node:events";
+import { finished } from "node:stream/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import os from "node:os";
 import { deflateSync, inflateSync } from "node:zlib";
 import { KATEX_WOFF2_FONT_FILES } from "./katexRuntimeAssets.js";
+import { normalizeGeneratedPdfInlineImageLines } from "./readableMarkdown.js";
+import { tableGeometryPlugin } from "../../public/tableGeometry.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "../..");
 let markdownitInstance = null;
 let docxInstance = null;
 let katexInstance = null;
 let embeddedKatexCssInstance = null;
+// A fatal browser graphics error is process-wide for the current desktop
+// session. Avoid starting the same unusable browser for every export.
 export function sanitizeXmlText(value) {
   return String(value ?? "")
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "")
@@ -412,7 +427,7 @@ function markdownImageMime(data) {
   return null;
 }
 
-export async function readSafeMarkdownImageAsset(source, baseDir, allowedRoot = baseDir) {
+async function resolveSafeMarkdownImageAsset(source, baseDir, allowedRoot = baseDir) {
   if (!baseDir || !source) return null;
   let decoded;
   try {
@@ -430,10 +445,31 @@ export async function readSafeMarkdownImageAsset(source, baseDir, allowedRoot = 
     if (!isPathInside(candidateReal, rootReal)) return null;
     const fileStat = await stat(candidateReal);
     if (!fileStat.isFile()) return null;
-    const data = await readFile(candidateReal);
+    const handle = await open(candidateReal, "r");
+    let head;
+    try {
+      head = Buffer.alloc(Math.min(32, Math.max(8, fileStat.size)));
+      const { bytesRead } = await handle.read(head, 0, head.length, 0);
+      head = head.subarray(0, bytesRead);
+    } finally {
+      await handle.close();
+    }
+    const mime = markdownImageMime(head);
+    if (!mime) return null;
+    return { filePath: candidateReal, mime, size: fileStat.size };
+  } catch {
+    return null;
+  }
+}
+
+export async function readSafeMarkdownImageAsset(source, baseDir, allowedRoot = baseDir) {
+  const resolved = await resolveSafeMarkdownImageAsset(source, baseDir, allowedRoot);
+  if (!resolved) return null;
+  try {
+    const data = await readFile(resolved.filePath);
     const mime = markdownImageMime(data);
     if (!mime) return null;
-    return { filePath: candidateReal, data, mime };
+    return { filePath: resolved.filePath, data, mime };
   } catch {
     return null;
   }
@@ -442,6 +478,7 @@ export async function readSafeMarkdownImageAsset(source, baseDir, allowedRoot = 
 async function loadMarkdownImages(markdown, options = {}) {
   const images = new Map();
   for (const match of String(markdown || "").matchAll(markdownImagePattern)) {
+    await checkExportBudget(options);
     const source = match[2] || match[3] || "";
     if (images.has(source)) continue;
     const asset = await readSafeMarkdownImageAsset(source, options.baseDir, options.assetRoot || options.baseDir);
@@ -464,8 +501,9 @@ async function loadMarkdownImages(markdown, options = {}) {
 }
 
 async function inlineMarkdownImages(markdown, options = {}) {
-  const images = await loadMarkdownImages(markdown, options);
-  return String(markdown).replace(markdownImagePattern, (full, alt, angleSource, plainSource) => {
+  const normalizedMarkdown = normalizeGeneratedPdfInlineImageLines(markdown);
+  const images = await loadMarkdownImages(normalizedMarkdown, options);
+  return normalizedMarkdown.replace(markdownImagePattern, (full, alt, angleSource, plainSource) => {
     const source = angleSource || plainSource || "";
     const image = images.get(source);
     if (!image) {
@@ -860,9 +898,12 @@ index++;
 while (index < tokens.length && tokens[index].type !== "tr_close") {
 const cellToken = tokens[index];
 if (cellToken.type === "th_open" || cellToken.type === "td_open") {
+if (cellToken.meta?.covered) { index += 3; continue; }
 const runs = parseInline(tokens[index + 1], cellToken.type === "th_open", 3, false, tableTextSize);
 cells.push(new docx.TableCell({
-width: { size: colPercent, type: docx.WidthType.PERCENTAGE },
+width: { size: colPercent * (cellToken.meta?.geometry?.columnSpan || 1), type: docx.WidthType.PERCENTAGE },
+columnSpan: cellToken.meta?.geometry?.columnSpan,
+rowSpan: cellToken.meta?.geometry?.rowSpan,
 shading: cellToken.type === "th_open" ? { fill: "f1f5f9" } : undefined,
 margins: { top: cellMargin, bottom: cellMargin, left: cellMargin, right: cellMargin },
 children: [new docx.Paragraph({ spacing: { after: 60 }, children: runs })]
@@ -899,6 +940,7 @@ return children;
 export async function exportMarkdownToDocx(markdown, options = {}) {
   const { markdownit, docx } = await initExportLibraries();
   const md = new markdownit({ html: true, linkify: true, typographer: true });
+  md.use(tableGeometryPlugin);
   const xmlSafeMarkdown = sanitizeXmlText(markdown);
   const imageTokens = await loadMarkdownImages(xmlSafeMarkdown, options);
 
@@ -1136,23 +1178,23 @@ function extractMarkdownMath(markdown, markdownit) {
   };
 }
 
-export async function exportMarkdownToHtml(markdown, options = {}) {
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+async function renderMarkdownHtmlBody(markdown) {
   const { markdownit, katex } = await initExportLibraries();
   const md = new markdownit({ html: false, linkify: true, typographer: true });
+  md.use(tableGeometryPlugin);
 
-  const markdownWithImages = await inlineMarkdownImages(markdown, options);
-  const { mathTokens, processedMarkdown, tokenPattern } = extractMarkdownMath(markdownWithImages, md);
+  const { mathTokens, processedMarkdown, tokenPattern } = extractMarkdownMath(markdown, md);
 
   let renderedBody = md.render(processedMarkdown);
-
-  const escapeHtml = (unsafe) => {
-    return String(unsafe ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
-  };
 
   const restoreMathToken = (_token, rawIndex, plainText = false) => {
     const item = mathTokens[Number(rawIndex)];
@@ -1180,9 +1222,14 @@ export async function exportMarkdownToHtml(markdown, options = {}) {
     return segment.replace(tokenPattern, (token, rawIndex) => restoreMathToken(token, rawIndex, index % 2 === 1));
   }).join("");
 
+  return renderedBody;
+}
+
+async function htmlDocumentFragments(options = {}) {
   const title = escapeHtml(String(options.title || "Exported Document"));
   const katexCss = await embeddedKatexCss();
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'none'; connect-src 'none'; font-src data:; base-uri 'none'; form-action 'none'"><title>${title}</title>
+  return {
+    start: `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'none'; connect-src 'none'; font-src data:; base-uri 'none'; form-action 'none'"><title>${title}</title>
 <style>
 ${katexCss}
 body{font-family:"Segoe UI","Microsoft YaHei",sans-serif;line-height:1.6;color:#1f2937;max-width:800px;margin:40px auto;padding:0 20px}
@@ -1207,9 +1254,139 @@ tr:nth-child(even){background-color:#f8fafc}
 </style>
 </head>
 <body>
-${renderedBody}
+`,
+    end: `
 </body>
-</html>`;
+</html>`
+  };
+}
+
+async function prepareStreamedMarkdownImages(markdown, options = {}) {
+  const normalizedMarkdown = normalizeGeneratedPdfInlineImageLines(markdown);
+  const markerPrefix = `__schema_docs_stream_image_${randomBytes(16).toString("hex")}_`;
+  const markerPattern = new RegExp(`\\bsrc="${markerPrefix}(\\d+)__\\.invalid`, "g");
+  const bySource = new Map();
+  const assets = [];
+  for (const match of normalizedMarkdown.matchAll(markdownImagePattern)) {
+    await checkExportBudget(options);
+    const source = match[2] || match[3] || "";
+    if (bySource.has(source)) continue;
+    const resolved = await resolveSafeMarkdownImageAsset(source, options.baseDir, options.assetRoot || options.baseDir);
+    if (!resolved) {
+      bySource.set(source, null);
+      continue;
+    }
+    const asset = { ...resolved, id: assets.length };
+    assets.push(asset);
+    bySource.set(source, asset);
+  }
+  let imageOccurrences = 0;
+  const preparedMarkdown = normalizedMarkdown.replace(markdownImagePattern, (_full, alt, angleSource, plainSource) => {
+    const source = angleSource || plainSource || "";
+    const asset = bySource.get(source);
+    if (!asset) {
+      const label = String(alt || "image")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 200)
+        .replaceAll("`", "'");
+      return `\`[Image omitted from export: ${label || "image"}]\``;
+    }
+    imageOccurrences += 1;
+    return `![${alt || ""}](${markerPrefix}${asset.id}__.invalid)`;
+  });
+  return { assets, imageOccurrences, markerPattern, preparedMarkdown };
+}
+
+async function writeStreamChunk(stream, value, metrics) {
+  await checkExportBudget(metrics.options);
+  if (!value) return;
+  metrics.bytesWritten += Buffer.byteLength(value);
+  if (!stream.write(value, "utf8")) await once(stream, "drain");
+}
+
+async function writeBase64File(stream, filePath, metrics) {
+  let carry = Buffer.alloc(0);
+  for await (const rawChunk of createReadStream(filePath, { highWaterMark: 64 * 1024 })) {
+    const chunk = carry.length ? Buffer.concat([carry, rawChunk]) : rawChunk;
+    const completeLength = chunk.length - (chunk.length % 3);
+    if (completeLength) {
+      await writeStreamChunk(stream, chunk.subarray(0, completeLength).toString("base64"), metrics);
+    }
+    carry = completeLength < chunk.length ? Buffer.from(chunk.subarray(completeLength)) : Buffer.alloc(0);
+  }
+  if (carry.length) await writeStreamChunk(stream, carry.toString("base64"), metrics);
+}
+
+function createStreamedHtmlMetrics() {
+  return {
+    bytesWritten: 0,
+    imageOccurrences: 0,
+    uniqueImageCount: 0,
+    sourceImageBytes: 0,
+    renderedChunkCount: 0,
+    imageFiles: new Map()
+  };
+}
+
+async function writeStreamedMarkdownBody(output, markdown, options, metrics) {
+  const { assets, imageOccurrences, markerPattern, preparedMarkdown } = await prepareStreamedMarkdownImages(markdown, options);
+  const renderedBody = await renderMarkdownHtmlBody(preparedMarkdown);
+  metrics.imageOccurrences += imageOccurrences;
+  metrics.renderedChunkCount += 1;
+  for (const asset of assets) {
+    if (!metrics.imageFiles.has(asset.filePath)) metrics.imageFiles.set(asset.filePath, asset.size);
+  }
+  let cursor = 0;
+  for (const match of renderedBody.matchAll(markerPattern)) {
+    await writeStreamChunk(output, renderedBody.slice(cursor, match.index), metrics);
+    const asset = assets[Number(match[1])];
+    if (!asset) throw new Error(`Streamed HTML image marker is invalid: ${match[1]}`);
+    await writeStreamChunk(output, `src="data:${asset.mime};base64,`, metrics);
+    await writeBase64File(output, asset.filePath, metrics);
+    cursor = match.index + match[0].length;
+  }
+  await writeStreamChunk(output, renderedBody.slice(cursor), metrics);
+}
+
+function publicStreamedHtmlMetrics(metrics) {
+  return {
+    bytesWritten: metrics.bytesWritten,
+    imageOccurrences: metrics.imageOccurrences,
+    uniqueImageCount: metrics.imageFiles.size,
+    sourceImageBytes: [...metrics.imageFiles.values()].reduce((total, size) => total + size, 0),
+    renderedChunkCount: metrics.renderedChunkCount
+  };
+}
+
+/**
+ * Writes a self-contained HTML document without materializing image buffers,
+ * base64 payloads, or the final document as one large JavaScript string.
+ */
+export async function exportMarkdownToHtmlFile(markdown, outputPath, options = {}) {
+  const fragments = await htmlDocumentFragments(options);
+  const metrics = createStreamedHtmlMetrics();
+  metrics.options = options;
+  const output = createWriteStream(outputPath, { encoding: "utf8", flags: "w" });
+  try {
+    await writeStreamChunk(output, fragments.start, metrics);
+    await writeStreamedMarkdownBody(output, markdown, options, metrics);
+    await writeStreamChunk(output, fragments.end, metrics);
+    output.end();
+    await finished(output);
+    return publicStreamedHtmlMetrics(metrics);
+  } catch (error) {
+    output.destroy(error);
+    await finished(output).catch(() => {});
+    throw error;
+  }
+}
+
+export async function exportMarkdownToHtml(markdown, options = {}) {
+  const markdownWithImages = await inlineMarkdownImages(markdown, options);
+  const renderedBody = await renderMarkdownHtmlBody(markdownWithImages);
+  const fragments = await htmlDocumentFragments(options);
+  return `${fragments.start}${renderedBody}${fragments.end}`;
 }
 
 function delay(milliseconds) {
@@ -1255,6 +1432,18 @@ await delay(intervalMs);
 throw new Error(`Browser PDF output did not become complete and stable within ${timeoutMs} ms.`);
 }
 
+async function waitForPdfFilePresence(filePath, timeoutMs = 5000) {
+const deadline = Date.now() + Math.max(100, Number(timeoutMs || 5000));
+while (Date.now() <= deadline) {
+try {
+const info = await stat(filePath);
+if (info.isFile() && info.size >= 12) return true;
+} catch {}
+await delay(150);
+}
+return false;
+}
+
 export function resolveBrowserPdfTimeouts(markdown, html, options = {}) {
 const htmlBytes = Buffer.byteLength(String(html || ""), "utf8");
 const imageCount = (String(markdown || "").match(/!\[[^\]]*\]\((?:<[^>]+>|[^\s)]+)\)/g) || []).length;
@@ -1278,11 +1467,11 @@ complexityUnits
 async function findChromiumPath() {
 const isWin = process.platform === "win32";
 const paths = isWin ? [
-path.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "Microsoft\\Edge\\Application\\msedge.exe"),
-path.join(process.env["ProgramFiles"] || "C:\\Program Files", "Microsoft\\Edge\\Application\\msedge.exe"),
 path.join(process.env["ProgramFiles"] || "C:\\Program Files", "Google\\Chrome\\Application\\chrome.exe"),
 path.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "Google\\Chrome\\Application\\chrome.exe"),
-path.join(process.env["LOCALAPPDATA"] || "C:\\Users\\Default\\AppData\\Local", "Google\\Chrome\\Application\\chrome.exe")
+path.join(process.env["LOCALAPPDATA"] || "C:\\Users\\Default\\AppData\\Local", "Google\\Chrome\\Application\\chrome.exe"),
+path.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "Microsoft\\Edge\\Application\\msedge.exe"),
+path.join(process.env["ProgramFiles"] || "C:\\Program Files", "Microsoft\\Edge\\Application\\msedge.exe")
 ] : process.platform === "darwin" ? [
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
 "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
@@ -1307,14 +1496,29 @@ if (loc) return loc;
 }
 return null;
 }
+async function nativePdfFallbackWithPayload(markdown, options = {}) {
+ const source = String(markdown || "");
+ const imageMatches = [...source.matchAll(markdownImagePattern)];
+ const imageDeckPdf = imageMatches.length ? await imageDeckMarkdownToPdf(source, options) : null;
+ if (imageMatches.length && !imageDeckPdf) {
+  throw new Error("Native PDF fallback cannot preserve mixed local images; retry with a working browser renderer.");
+ }
+ const { markdownToPdfBuffer } = await import("../adapters/pdfMarkdownConverter.js");
+ const nativePdf = imageDeckPdf || markdownToPdfBuffer(source);
+ const payload = Buffer.from(`\n% SCHEMA_DOCS_PAYLOAD:${Buffer.from(source).toString("base64")}\n`);
+ return Buffer.concat([nativePdf, payload]);
+}
 export async function exportMarkdownToPdf(markdown, options = {}) {
 const imageDeckPdf = await imageDeckMarkdownToPdf(markdown, options);
 if (imageDeckPdf) return imageDeckPdf;
-if (process.env.NODE_TEST_CONTEXT) {
+// The deterministic writer is a test fixture only when explicitly requested.
+// NODE_TEST_CONTEXT alone must never change the production export decision.
+if (options.renderer === "native-test") {
 const { markdownToPdfBuffer } = await import("../adapters/pdfMarkdownConverter.js");
 return markdownToPdfBuffer(markdown);
 }
 let tempDir = "";
+let browserFailed = false;
 try {
 const browser = await findChromiumPath();
 if (!browser) throw new Error("No supported Microsoft Edge, Google Chrome, or Chromium executable was found.");
@@ -1325,10 +1529,20 @@ const tmpHtml = path.join(tempDir, "document.html");
 const tmpPdf = path.join(tempDir, "document.pdf");
 const browserProfile = path.join(tempDir, "browser-profile");
 await writeFile(tmpHtml, html, "utf8");
-const browserResult = await new Promise((resolve) => {
-execFile(browser, [
+ const browserResult = await new Promise((resolve) => {
+  let settled = false;
+  const finish = (result) => {
+   if (settled) return;
+   settled = true;
+   resolve(result);
+  };
+let child;
+child = execFile(browser, [
 "--headless",
 "--disable-gpu",
+"--disable-gpu-compositing",
+"--disable-software-rasterizer",
+"--in-process-gpu",
 "--disable-extensions",
 "--disable-background-networking",
 "--disable-background-mode",
@@ -1344,37 +1558,89 @@ windowsHide: true,
 timeout: pdfTimeouts.browserTimeoutMs,
 maxBuffer: 16 * 1024 * 1024
 }, (error, stdout, stderr) => {
-resolve({ error, stdout: String(stdout || ""), stderr: String(stderr || "") });
+   finish({
+error,
+stdout: String(stdout || ""),
+stderr: String(stderr || ""),
+exitCode: child.exitCode
 });
+});
+  // Chromium may print a recoverable GPU/virtualization warning while still
+  // producing a valid PDF. Do not kill the process based on stderr alone.
+  // Strict early abort remains opt-in for callers that explicitly need it.
+  if (options.abortOnBrowserFatal === true && child?.stderr) {
+   const fatalBrowserError = /GPU process isn't usable|Failed to create shared context|ContextResult::kFatalFailure|GPU process crashed/i;
+   child.stderr.on("data", (chunk) => {
+    if (fatalBrowserError.test(String(chunk))) {
+      browserFailed = true;
+     finish({
+      error: new Error("Browser reported a fatal GPU/virtualization initialization error."),
+      stdout: "",
+      stderr: String(chunk),
+      exitCode: null
+     });
+     if (process.platform === "win32" && child.pid) {
+      execFile("taskkill", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true }, () => {});
+     } else {
+      try { child.kill("SIGKILL"); } catch {}
+     }
+    }
+   });
+  }
 });
 let pdfBuf;
 try {
+  if (browserResult.error) {
+   const details = [browserResult.error.message, browserResult.stderr, browserResult.stdout]
+    .filter(Boolean)
+    .join("\n")
+    .slice(0, 8000);
+   throw new Error(`Browser process failed before producing a PDF.\nBrowser process: ${details}`);
+  }
+if (!browserResult.error && browserResult.exitCode === 0) {
+const outputExists = await waitForPdfFilePresence(tmpPdf, Math.min(5000, pdfTimeouts.pdfOutputTimeoutMs));
+if (!outputExists) {
+throw new Error("Browser process exited successfully but did not create a PDF output file.");
+}
+}
 pdfBuf = await waitForStablePdfFile(tmpPdf, {
 timeoutMs: pdfTimeouts.pdfOutputTimeoutMs,
 intervalMs: options.pdfOutputPollIntervalMs,
 stableSamples: options.pdfOutputStableSamples
 });
 } catch (outputError) {
-if (browserResult.error) {
-const details = [browserResult.error.message, browserResult.stderr, browserResult.stdout]
-.filter(Boolean)
-.join("\n")
-.slice(0, 8000);
-throw new Error(`${outputError.message}\nBrowser process: ${details}`);
-}
 throw outputError;
 }
 const base64Md = Buffer.from(markdown).toString("base64");
 const payload = Buffer.from(`\n% SCHEMA_DOCS_PAYLOAD:${base64Md}\n`);
 return Buffer.concat([pdfBuf, payload]);
 } catch (err) {
+ // A native writer is an explicit degraded mode. It must never be selected
+ // merely because the browser failed, otherwise a successful file can contain
+ // literal Markdown and be mistaken for a styled export.
+ const allowNativePdfFallback = options.allowNativePdfFallback === true;
+ if (allowNativePdfFallback) {
+  try {
+   // Headless Chromium can be unavailable or unusable on machines without a
+   // working GPU/virtualization context. Keep PDF export usable by falling
+   // back to the deterministic native converter, while preserving the
+   // embedded markdown payload used by the round-trip importer.
+   return await nativePdfFallbackWithPayload(markdown, options);
+  } catch (fallbackError) {
+   err = new Error(`${err.message}; native PDF fallback failed: ${fallbackError.message}`, { cause: err });
+  }
+ }
 const prefix = /!\[[^\]]*\]\((?:<[^>]+>|[^\s)]+)\)/.test(String(markdown || ""))
 ? "Styled PDF export could not preserve local images"
 : "Styled PDF export failed";
 throw new Error(`${prefix}: ${err.message}`, { cause: err });
 } finally {
 if (tempDir) {
-await rm(tempDir, {
+ if (browserFailed) {
+  // The browser may still hold the temporary profile after a fatal graphics
+  // error. Queue cleanup without making the export wait for file handles.
+  void rm(tempDir, { recursive: true, force: true }).catch(() => {});
+ } else await rm(tempDir, {
 recursive: true,
 force: true,
 maxRetries: 20,

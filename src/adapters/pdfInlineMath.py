@@ -556,6 +556,14 @@ TEX_MATH_EXTENSION_PRIVATE_MAP = {
     ("\uf8f9\uf8fa\uf8fb", "]")) for char in chars
 }
 
+# Adobe Symbol fonts use the same private-use delimiter slots with a
+# left/right brace orientation that differs from CMEX's mapping.
+TEX_SYMBOL_EXTENSION_PRIVATE_MAP = {
+    char: fence for chars, fence in (("\uf8e8\uf8e9\uf8ea", "["), ("\uf8eb\uf8ec\uf8ed", "("),
+    ("\uf8ee\uf8ef\uf8f0", "["), ("\uf8f1\uf8f2\uf8f3\uf8f4", "{"), ("\uf8f6\uf8f7\uf8f8", ")"),
+    ("\uf8f9\uf8fa\uf8fb", "]"), ("\uf8fc\uf8fd\uf8fe", "}")) for char in chars
+}
+
 LATEX_CHAR_MAP = {
     "\u00b1": r"\pm ",
     "\u00d7": r"\times ",
@@ -735,6 +743,8 @@ def latex_char(char):
         return "/"
     if text == ";" and family.startswith(("CMMI", "LMMathItalic", "HFBRMI")):
         return ","
+    if family.startswith("Symbol") and text in TEX_SYMBOL_EXTENSION_PRIVATE_MAP:
+        return TEX_SYMBOL_EXTENSION_PRIVATE_MAP[text]
     if family.startswith(("CMEX", "LMMathExtension")) and text in TEX_MATH_EXTENSION_PRIVATE_MAP:
         return TEX_MATH_EXTENSION_PRIVATE_MAP[text]
     if text in LATEX_CHAR_MAP:
@@ -751,7 +761,7 @@ def latex_char(char):
 def is_extension_delimiter(char):
     family = embedded_font_family(char.get("fontname"))
     return (
-        family.startswith(("CMEX", "LMMathExtension"))
+        family.startswith(("CMEX", "LMMathExtension", "Symbol"))
         and latex_char(char).strip() in EXTENSION_DELIMITERS
     )
 

@@ -4,6 +4,7 @@ import { readManifest } from "./manifest.js";
 import { readExchangePackage } from "./exchangePackage.js";
 import { appendEvidenceRecord } from "./evidence.js";
 import { appendTimelineEvent } from "./timeline.js";
+import { parseStructuredMarkdown, summarizeStructuredRange } from "./structuredChunker.js";
 export function renderDatasetMarkdown(dataset) {
 const lines = [
 `# ${dataset.name}`,
@@ -98,19 +99,25 @@ stride,
 chunkCount
 };
 }
-function buildChunkDescriptor(text, index, geometry = getChunkGeometry(text)) {
+function buildChunkDescriptor(text, index, geometry = getChunkGeometry(text), structuredBlocks = parseStructuredMarkdown(text)) {
 if (index < 1 || index > geometry.chunkCount) return null;
 const startChar = (index - 1) * geometry.stride;
 const endChar = Math.min(text.length, startChar + geometry.chunkCharBudget);
 const slice = text.slice(startChar, endChar);
 const headingMatch = slice.match(/^#{1,6}\s+(.+)$/m);
+const structure = summarizeStructuredRange(structuredBlocks, startChar, endChar);
 return {
 id: `chunk_${String(index).padStart(4, "0")}`,
 index,
 startChar,
 endChar,
 estimatedTokens: estimateTokens(slice),
-headingHint: headingMatch ? headingMatch[0] : ""
+ headingHint: headingMatch ? headingMatch[0] : "",
+ headingPath: structure.headingPath,
+ blockTypes: structure.blockTypes,
+ protectedBlocks: structure.protectedBlocks,
+ hasPartialProtectedBlock: structure.hasPartialProtectedBlock,
+ sourceRanges: structure.sourceRanges
 };
 }
 function suggestedRangeChunkCount(chunkTokenBudget = DEFAULT_CHUNK_TOKEN_BUDGET, tokenBudget = DEFAULT_BUNDLE_TOKEN_BUDGET) {
@@ -247,6 +254,7 @@ export function buildAiIntakePlan(markdown, metadata = {}, qualityWarnings = [])
  const tokenEstimate = estimateTokens(text);
  const sourceSize = Number(metadata.sourceSize ?? 0);
  const geometry = getChunkGeometry(text);
+ const structuredBlocks = parseStructuredMarkdown(text);
  const { chunkTokenBudget, overlapTokens, chunkCount } = geometry;
  const isLargeByTokens = tokenEstimate > chunkTokenBudget * 2;
  const isLargeByBytes = sourceSize > 25 * 1024 * 1024;
@@ -258,7 +266,7 @@ export function buildAiIntakePlan(markdown, metadata = {}, qualityWarnings = [])
   : (isLargeByTokens || isLargeByBytes ? "chunked_large_document" : "chunked_context");
  const chunks = [];
  for (let index = 0; index < Math.min(chunkCount, MAX_PREVIEW_CHUNKS); index += 1) {
-  chunks.push(buildChunkDescriptor(text, index + 1, geometry));
+   chunks.push(buildChunkDescriptor(text, index + 1, geometry, structuredBlocks));
  }
  const warnings = [];
  if (chunkCount > 1) {
@@ -481,7 +489,7 @@ export async function resolveAiContextChunk(workspacePath, recordIdOrPackagePath
  const preview = await compileAiContextPreview(workspacePath, recordIdOrPackagePath);
  const requestedIndex = Math.max(1, Number(chunkIndex) || 1);
  const markdown = await readAiContextMarkdown(workspacePath, recordIdOrPackagePath);
- const chunk = buildChunkDescriptor(markdown, requestedIndex);
+  const chunk = buildChunkDescriptor(markdown, requestedIndex, getChunkGeometry(markdown), parseStructuredMarkdown(markdown));
  if (!chunk) throw new Error(`AI context chunk not found: ${requestedIndex}`);
  const content = markdown.slice(chunk.startChar, chunk.endChar);
  const continuation = continuationState(recordIdOrPackagePath, preview.aiIntakePlan, requestedIndex, {
@@ -540,10 +548,11 @@ export async function resolveAiContextChunkRange(workspacePath, recordIdOrPackag
  const maxTokenBudget = Math.max(1, Number(tokenBudget) || DEFAULT_BUNDLE_TOKEN_BUDGET);
  const markdown = await readAiContextMarkdown(workspacePath, recordIdOrPackagePath);
  const geometry = getChunkGeometry(markdown);
+ const structuredBlocks = parseStructuredMarkdown(markdown);
  const selectedChunks = [];
  const boundedEndIndex = Math.min(requestedEndIndex, geometry.chunkCount);
  for (let index = startIndex; index <= boundedEndIndex; index += 1) {
-  const chunk = buildChunkDescriptor(markdown, index, geometry);
+   const chunk = buildChunkDescriptor(markdown, index, geometry, structuredBlocks);
   if (chunk) {
    selectedChunks.push(chunk);
   }

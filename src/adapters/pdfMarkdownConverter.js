@@ -1,7 +1,38 @@
 import path from "node:path";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import zlib from "node:zlib";
 import { collapseMarkdownBlankLines, markdownTable } from "../core/markdownFormatting.js";
+import { createPdfPageLedgerFromMarkdown } from "./pdfPageBackend.js";
+export const DEFAULT_MAX_DECOMPRESSED_BYTES = 256 * 1024 * 1024;
+export const DEFAULT_MAX_INPUT_BYTES = 128 * 1024 * 1024;
+export const MAX_PDF_PAGE_COUNT = 1_000_000;
+
+function normalizePdfLimit(value, fallback, label) {
+ if (value === undefined || value === null || value === "") return fallback;
+ const numeric = Number(value);
+ if (!Number.isSafeInteger(numeric) || numeric < 1) {
+  const error = new Error(`${label} must be a finite positive integer.`);
+  error.code = "PDF_BUDGET_INVALID";
+  throw error;
+ }
+ return numeric;
+}
+
+export function assertPdfInputSize(inputStat, maxInputBytes = DEFAULT_MAX_INPUT_BYTES) {
+ const size = Number(inputStat?.size);
+ const limit = normalizePdfLimit(maxInputBytes, DEFAULT_MAX_INPUT_BYTES, "maxInputBytes");
+ if (!Number.isFinite(size) || size < 0) {
+  const error = new Error("PDF input stat size must be a finite non-negative number.");
+  error.code = "PDF_INPUT_STAT_INVALID";
+  throw error;
+ }
+ if (Number.isFinite(size) && size > limit) {
+  const error = new Error(`PDF input exceeds the configured size limit (${limit} bytes).`);
+  error.code = "PDF_INPUT_LIMIT";
+  throw error;
+ }
+ return { size, limit };
+}
 function unescapePdfText(value) {
  let str = value
   .replace(/\\n/g, "\n")
@@ -131,37 +162,42 @@ export function markdownToPdfBuffer(markdown) {
  parts.push(`trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`);
  return Buffer.from(parts.join(""), "utf8");
 }
-async function decompressPdfStreams(buffer) {
+async function decompressPdfStreams(buffer, options = {}) {
  const streams = [];
+ const maxDecompressedBytes = normalizePdfLimit(options.maxDecompressedBytes, DEFAULT_MAX_DECOMPRESSED_BYTES, "maxDecompressedBytes");
+ const streamMarker = Buffer.from("stream");
+ const endstreamMarker = Buffer.from("endstream");
+ const dictionaryMarker = Buffer.from("<<");
+ let decompressedBytes = 0;
  let index = 0;
  let count = 0;
- while (true) {
+  while (true) {
   count++;
   if (count % 30 === 0) {
    await new Promise((resolve) => setImmediate(resolve));
+   if (typeof options.assertNotCancelled === "function") await options.assertNotCancelled();
   }
-  const streamStart = buffer.indexOf(Buffer.from("stream\r\n"), index);
-  const streamStartLf = buffer.indexOf(Buffer.from("stream\n"), index);
-  let startOffset = -1;
-  let dataStart = -1;
-  if (streamStart !== -1 && (streamStartLf === -1 || streamStart < streamStartLf)) {
-   startOffset = streamStart;
-   dataStart = streamStart + 8;
-  } else if (streamStartLf !== -1) {
-   startOffset = streamStartLf;
-   dataStart = streamStartLf + 7;
-  }
+  const startOffset = buffer.indexOf(streamMarker, index);
   if (startOffset === -1) break;
-  const endstream = buffer.indexOf(Buffer.from("endstream"), dataStart);
+  let dataStart = -1;
+  if (buffer[startOffset + streamMarker.length] === 13 && buffer[startOffset + streamMarker.length + 1] === 10) {
+   dataStart = startOffset + streamMarker.length + 2;
+  } else if (buffer[startOffset + streamMarker.length] === 10) {
+   dataStart = startOffset + streamMarker.length + 1;
+  } else {
+   index = startOffset + streamMarker.length;
+   continue;
+  }
+  const endstream = buffer.indexOf(endstreamMarker, dataStart);
   if (endstream === -1) {
-   index = startOffset + 6;
+   index = startOffset + streamMarker.length;
    continue;
   }
   let dataEnd = endstream;
   if (buffer[dataEnd - 1] === 10) dataEnd--;
   if (buffer[dataEnd - 1] === 13) dataEnd--;
   const streamData = buffer.slice(dataStart, dataEnd);
-  const dictStart = buffer.lastIndexOf(Buffer.from("<<"), startOffset);
+  const dictStart = buffer.lastIndexOf(dictionaryMarker, startOffset);
   let isCompressed = false;
   if (dictStart !== -1 && dictStart < startOffset) {
    const dictContent = buffer.slice(dictStart, startOffset).toString("ascii");
@@ -171,12 +207,41 @@ async function decompressPdfStreams(buffer) {
   }
   if (isCompressed) {
    try {
-    const decompressed = zlib.inflateSync(streamData);
-    streams.push(decompressed.toString("latin1"));
-   } catch {
+    const remainingBudget = maxDecompressedBytes - decompressedBytes;
+    if (remainingBudget <= 0) {
+     const error = new Error(`PDF decompressed stream budget exceeded (${maxDecompressedBytes} bytes).`);
+     error.code = "PDF_DECOMPRESSION_LIMIT";
+     throw error;
+    }
+    const decompressed = zlib.inflateSync(streamData, { maxOutputLength: remainingBudget });
+    decompressedBytes += decompressed.byteLength;
+    if (decompressedBytes > maxDecompressedBytes) {
+     const error = new Error(`PDF decompressed stream budget exceeded (${maxDecompressedBytes} bytes).`);
+     error.code = "PDF_DECOMPRESSION_LIMIT";
+     throw error;
+   }
+   streams.push(decompressed.toString("latin1"));
+   } catch (error) {
+    if (error?.code === "ERR_BUFFER_TOO_LARGE" || error?.code === "PDF_DECOMPRESSION_LIMIT") {
+     const limitError = new Error(`PDF decompressed stream budget exceeded (${maxDecompressedBytes} bytes).`);
+     limitError.code = "PDF_DECOMPRESSION_LIMIT";
+     throw limitError;
+    }
+    decompressedBytes += streamData.byteLength;
+    if (decompressedBytes > maxDecompressedBytes) {
+     const error = new Error(`PDF decompressed stream budget exceeded (${maxDecompressedBytes} bytes).`);
+     error.code = "PDF_DECOMPRESSION_LIMIT";
+     throw error;
+    }
     streams.push(streamData.toString("latin1"));
    }
   } else {
+   decompressedBytes += streamData.byteLength;
+   if (decompressedBytes > maxDecompressedBytes) {
+    const error = new Error(`PDF decompressed stream budget exceeded (${maxDecompressedBytes} bytes).`);
+    error.code = "PDF_DECOMPRESSION_LIMIT";
+    throw error;
+   }
    streams.push(streamData.toString("latin1"));
   }
   index = endstream + 9;
@@ -379,17 +444,29 @@ function hasLowReadableText(markdown) {
  if (readabilityRatio >= 0.65 && escapeNoiseRatio < 0.05) return false;
  return escapeNoise >= 3 || longHexRuns > 0 || (printable.length >= 24 && readabilityRatio < 0.35) || (printable.length >= 80 && mojibakeRatio > 0.12);
 }
-export async function pdfBufferToMarkdown(buffer, sourceName = "source.pdf") {
+export function detectPdfPageCount(buffer) {
+ const text = Buffer.isBuffer(buffer) ? buffer.toString("latin1") : String(buffer || "");
+ const dictionaries = [...text.matchAll(/<<([\s\S]{0,4096}?)>>/g)].map((match) => match[1]);
+ const counts = dictionaries
+  .filter((dictionary) => /\/Type\s*\/Pages\b/.test(dictionary))
+  .map((dictionary) => /\/Count\s+(\d+)/.exec(dictionary)?.[1])
+  .map((value) => Number(value))
+  .filter((value) => Number.isInteger(value) && value > 0);
+ const count = counts.length ? Math.max(...counts) : null;
+ return count !== null && count <= MAX_PDF_PAGE_COUNT ? count : null;
+}
+
+export async function pdfBufferToMarkdown(buffer, sourceName = "source.pdf", options = {}) {
  const payloadMarker = "SCHEMA_DOCS_PAYLOAD:";
  const markerIdx = buffer.lastIndexOf(payloadMarker);
  if (markerIdx !== -1) {
   try {
    const base64Str = buffer.slice(markerIdx + payloadMarker.length).toString("utf8").trim();
    const decoded = Buffer.from(base64Str, "base64").toString("utf8");
-   if (decoded) return decoded;
+     if (decoded) return decoded;
   } catch {}
  }
- const decompressedStreams = await decompressPdfStreams(buffer);
+  const decompressedStreams = await decompressPdfStreams(buffer, options);
  const lines = [];
  for (const streamContent of decompressedStreams) {
   lines.push(...extractTextFromStream(streamContent));
@@ -409,14 +486,21 @@ export async function pdfBufferToMarkdown(buffer, sourceName = "source.pdf") {
  ].join("\n").trimEnd() + "\n";
 }
 export const pdfMarkdownConverter = {
+ preferPageBackend: true,
  name: "pdf-text-layer-converter",
- cacheVersion: "3",
+ cacheVersion: "11",
  canHandle(file) {
   return path.extname(file.sourcePath ?? file).toLowerCase() === ".pdf";
  },
  async convert(input) {
-  const buffer = await readFile(input.sourcePath);
-  const markdown = await pdfBufferToMarkdown(buffer, path.basename(input.sourcePath));
+  const inputStat = input.inputStat || await stat(input.sourcePath);
+  assertPdfInputSize(inputStat, input.maxInputBytes);
+  const buffer = input.buffer || await readFile(input.sourcePath);
+  const markdown = await pdfBufferToMarkdown(buffer, path.basename(input.sourcePath), {
+   maxDecompressedBytes: input.maxDecompressedBytes,
+   assertNotCancelled: input.assertNotCancelled
+  });
+  const pageLedger = createPdfPageLedgerFromMarkdown(markdown, detectPdfPageCount(buffer));
   const hasText = !markdown.includes("no simple text layer");
   const lowReadableText = hasText && hasLowReadableText(markdown);
   const warnings = [];
@@ -445,6 +529,7 @@ export const pdfMarkdownConverter = {
   };
   return {
    markdown,
+   pageCount: detectPdfPageCount(buffer),
    warnings,
    quality: {
     hasTextLayer: hasText,
@@ -452,7 +537,8 @@ export const pdfMarkdownConverter = {
     hasOcrMissing: !hasText || lowReadableText,
     confidence: hasText && !lowReadableText ? "medium" : "low"
    },
-   extractionQuality
+    extractionQuality,
+    pageLedger
   };
  }
 };

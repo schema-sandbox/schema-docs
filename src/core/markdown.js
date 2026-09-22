@@ -1,6 +1,10 @@
 import path from "node:path";
-import { readFile, writeFile, rm } from "node:fs/promises";
+import { readFile, writeFile, rename, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { readManifest, withWorkspaceCommit } from "./manifest.js";
+import { AppError } from "./errors.js";
 import { assertInsideRoot, prepareSafeWritePath } from "./pathGuard.js";
+import { normalizeGeneratedPdfInlineImageLines } from "./readableMarkdown.js";
 function fixLegacyPdfNotice(content) {
 const text = String(content ?? "");
 if (
@@ -72,11 +76,39 @@ const relativePath = path.relative(workspacePath, safePath).split(path.sep).join
 return relativePath === "outputs" || relativePath.startsWith("outputs/");
 }
 export async function saveMarkdown(workspacePath, relativePath, content) {
+return withWorkspaceCommit(workspacePath, async () => {
 const isAbs = path.isAbsolute(relativePath);
 const outputPath = isAbs ? relativePath : path.join(workspacePath, relativePath);
 const safePath = await prepareSafeWritePath(outputPath, workspacePath, [".md"]);
-await writeFile(safePath, content, "utf8");
+await assertCurrentMarkdownPath(workspacePath, safePath);
+const temporaryPath = `${safePath}.${randomUUID()}.tmp`;
+try {
+await writeFile(temporaryPath, content, "utf8");
+await rename(temporaryPath, safePath);
+} finally { await rm(temporaryPath, { force: true }).catch(() => {}); }
 return safePath;
+});
+}
+
+async function assertCurrentMarkdownPath(workspacePath, target) {
+const relative = path.relative(workspacePath, target).split(path.sep).join("/");
+const revision = /^outputs\/revisions\/([^/]+)\/([^/]+)\//i.exec(relative);
+let manifest;
+try { manifest = await readManifest(workspacePath); }
+catch (error) { if (error.code === "manifest_not_found" && !revision) return; throw error; }
+const equal = candidate => candidate && path.relative(path.resolve(workspacePath, candidate), target) === "";
+const document = revision ? manifest.documents.find(doc => doc.id === revision[1])
+ : manifest.documents.find(doc => equal(doc.markdownVersionPath));
+const current = document && [document.outputMarkdownPath, document.refreshedMarkdownPath,
+ document.readableMarkdownPath, document.refreshedReadableMarkdownPath].filter(Boolean);
+const revisionRoot = revision && path.resolve(workspacePath, "outputs", "revisions", revision[1], revision[2]);
+if ((revision && !current?.some(candidate => {
+ const inside = path.relative(revisionRoot, path.resolve(workspacePath, candidate));
+ return inside && !inside.startsWith("..") && !path.isAbsolute(inside);
+}))
+ || (!revision && document && !current.some(equal))) {
+ throw new AppError("document_revision_conflict", "This document has a newer revision. Reopen it before saving; your requested change was not applied.");
+}
 }
 export async function readMarkdown(workspacePath, relativePath) {
 const isAbs = path.isAbsolute(relativePath);
@@ -86,16 +118,19 @@ const content = await readFile(safePath, "utf8");
 if (!shouldCleanConvertedMarkdown(workspacePath, safePath)) {
 return content;
 }
-const cleaned = stripDocumentProcessMetadata(fixLegacyPdfNotice(content));
+const cleaned = normalizeGeneratedPdfInlineImageLines(stripDocumentProcessMetadata(fixLegacyPdfNotice(content)));
 if (hasHighMojibakeRatio(cleaned)) {
 return lowReadableMarkdownNotice();
 }
 return cleaned;
 }
 export async function deleteMarkdown(workspacePath, relativePath) {
+return withWorkspaceCommit(workspacePath, async () => {
 const isAbs = path.isAbsolute(relativePath);
 const targetPath = isAbs ? relativePath : path.join(workspacePath, relativePath);
 const safePath = await assertInsideRoot(targetPath, workspacePath);
+await assertCurrentMarkdownPath(workspacePath, safePath);
 await rm(safePath, { force: true });
 return { ok: true, deletedPath: relativePath };
+});
 }

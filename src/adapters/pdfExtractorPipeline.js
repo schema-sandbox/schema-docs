@@ -1,12 +1,28 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
-import { readFile } from "node:fs/promises";
-import { pdfBufferToMarkdown } from "./pdfMarkdownConverter.js";
-import { analyzePdfSemanticLoss, detectPdfLayoutExtractor, extractPdfWithLayout } from "./pdfLayoutExtractor.js";
+import { readFile, stat } from "node:fs/promises";
+import { assertPdfInputSize, DEFAULT_MAX_INPUT_BYTES, detectPdfPageCount, pdfBufferToMarkdown } from "./pdfMarkdownConverter.js";
+import { analyzePdfSemanticLoss, detectPdfLayoutExtractor, extractPdfWithLayout, hasBundledPdfRuntime } from "./pdfLayoutExtractor.js";
 import { detectPdfOcrAdapter, extractPdfWithOcr } from "./pdfOcrExtractor.js";
 import { detectPdfMarkerExtractor, extractPdfWithMarker } from "./pdfMarkerExtractor.js";
+import { createPdfPageLedgerFromMarkdown } from "./pdfPageBackend.js";
+import { mergeOcrPages } from "./pdfOcrMerge.js";
+import { validatePdfConversion, validatePdfAssets } from "./pdfConversionValidation.js";
+import { assertMemoryBudget } from "./pdfPageStream.js";
 const execFileAsync = promisify(execFile);
+function isCancellationError(error) {
+ return ["job_cancelled", "ABORT_ERR", "resource_limit", "TIMEOUT", "ETIMEDOUT"].includes(error?.code) || error?.name === "AbortError";
+}
+async function detectPdfInfoPageCount(sourcePath) {
+ try {
+  const { stdout } = await execFileAsync("pdfinfo", [sourcePath], { timeout: 5000, maxBuffer: 256 * 1024 });
+  const match = /^(?:Pages|Page count):\s*(\d+)\s*$/im.exec(stdout);
+  return match ? Number(match[1]) : null;
+ } catch {
+  return null;
+ }
+}
 export function pdfBodyText(markdown) {
 let skippedDocumentTitle = false;
 return markdown
@@ -42,6 +58,7 @@ const commonRatio = commonChinese.length / cjkChars.length;
 if (cjkChars.length >= 10 && commonRatio < 0.015) {
 return true;
 }
+
 }
 
 const replacementCharCount = (text.match(/\ufffd/g) ?? []).length;
@@ -51,6 +68,31 @@ return true;
 
 if (readabilityRatio >= 0.65 && escapeNoiseRatio < 0.05) return false;
 return escapeNoise >= 3 || longHexRuns > 0 || (printable.length >= 24 && readabilityRatio < 0.35) || (printable.length >= 80 && mojibakeRatio > 0.12);
+}
+
+export function derivePdfPageQuality(page = {}) {
+ const pendingOcr = page.requiresOcr === true || ["partial", "failed"].includes(page.ocr?.status);
+ const reviewRegions = Array.isArray(page.ocrReviewRegions)
+  ? page.ocrReviewRegions
+  : (page.ocr?.regions || []).filter(region => ["visual_only", "unresolved", "failed"].includes(region.status));
+ const ocrReviewRequired = page.ocrReviewRequired === true || reviewRegions.length > 0;
+ const ocrCompleted = page.ocr?.status === "completed"
+  && String(page.ocr?.text || "").trim()
+  && (page.ocr?.regions || []).every(region => ["completed", "non_text", "visual_only"].includes(region.status));
+ const failedVisual = (page.regions || []).some(region => region.assetStatus === "failed") || Boolean(page.backendFailure);
+ const visualPreserved = (page.regions || []).some(region => region.needsVisualFallback || region.assetFile);
+ const qualityStatus = pendingOcr ? (ocrCompleted ? "ocr_completed" : "ocr_required")
+   : (failedVisual ? "unresolved" : (ocrReviewRequired ? "ocr_review_required" : (visualPreserved ? "visual_preserved" : "native_text")));
+ return {
+  qualityStatus,
+  pendingOcr,
+  ocrCompleted: Boolean(ocrCompleted),
+  ocrReviewRequired,
+  ocrReviewRegions: reviewRegions,
+  failedVisual,
+  visualPreserved,
+  issues: [pendingOcr && !ocrCompleted ? "ocr_required" : null, failedVisual ? "visual_render_failed" : null].filter(Boolean)
+ };
 }
 async function checkCommand(cmd, args = ["--version"]) {
 try {
@@ -74,6 +116,37 @@ version: null
 
 export async function runPdfExtractionPipeline(sourcePath, options = {}) {
 const preferred = options.preferredExtractor || "auto";
+const pageBackendFirst = preferred === "auto"
+ && (options.converter?.preferPageBackend === true || hasBundledPdfRuntime());
+const resourceTracker = { peakNodeRssBytes: process.memoryUsage().rss, heartbeatCount: 0, phases: {} };
+const observeHeartbeat = (phase, heartbeat = {}) => {
+ assertMemoryBudget(options.maxResidentBytes);
+ resourceTracker.heartbeatCount += 1;
+ const rss = Number(heartbeat.nodeRssBytes || process.memoryUsage().rss);
+ resourceTracker.peakNodeRssBytes = Math.max(resourceTracker.peakNodeRssBytes, rss);
+ const phaseRecord = resourceTracker.phases[phase] || { peakNodeRssBytes: 0, samples: 0 };
+ phaseRecord.samples += 1;
+ phaseRecord.peakNodeRssBytes = Math.max(phaseRecord.peakNodeRssBytes, rss);
+ resourceTracker.phases[phase] = phaseRecord;
+ return options.onHeartbeat?.({ ...heartbeat, phase, nodeRssBytes: rss });
+};
+const attachResources = () => {
+ assertMemoryBudget(options.maxResidentBytes);
+ resourceTracker.finalNodeRssBytes = process.memoryUsage().rss;
+ resourceTracker.peakNodeRssBytes = Math.max(resourceTracker.peakNodeRssBytes, resourceTracker.finalNodeRssBytes);
+ result.stats.resources = resourceTracker;
+ resourceTracker.layoutWorker = result.visualMap?.resources || null;
+ resourceTracker.ocrWorker = result.stats.ocr?.resources || null;
+ result.backendFailures = result.attempts.filter(attempt => attempt.status === "failed")
+  .map(attempt => ({ backend: attempt.name, message: attempt.warning }));
+ result.validation = validatePdfConversion(result, {
+  startPage: result.visualMap?.pageRange?.start || 1,
+  endPage: result.visualMap?.pageRange?.end || result.pageCount
+ });
+ if (!result.validation.passed || result.extractionQuality?.pendingOcrPages > 0
+  || result.extractionQuality?.unresolvedPages > 0 || result.extractionQuality?.failedVisualRegions > 0
+  || result.stats.ocr?.failedPages?.length > 0) result.partial = true;
+};
 const result = {
 markdown: "",
 extractorName: "built-in",
@@ -89,7 +162,34 @@ semanticLoss: null
 attempts: [],
 visualMap: null
 };
-const buffer = await readFile(sourcePath);
+const inputStat = await stat(sourcePath);
+const maxInputBytes = options.maxInputBytes ?? DEFAULT_MAX_INPUT_BYTES;
+// Validate the configured budget, but allow oversized PDFs to use the page
+// window backend when explicitly requested. Full-buffer fallbacks still refuse
+// the input below, so a large file can never silently be loaded into memory.
+let largeInput = false;
+try {
+  assertPdfInputSize({ ...inputStat, size: 0 }, maxInputBytes);
+  largeInput = Number(inputStat.size) > Number(maxInputBytes);
+  if (largeInput && !options.allowLargePageWindow) assertPdfInputSize(inputStat, maxInputBytes);
+} catch (error) {
+  if (!largeInput || !options.allowLargePageWindow) throw error;
+}
+if (largeInput) {
+  result.stats.resourceBudget = {
+    inputBytes: Number(inputStat.size),
+    maxInputBytes: Number(maxInputBytes),
+    mode: "page_window",
+    reason: "full_buffer_limit_bypassed_for_page_window"
+  };
+}
+result.pageCount = await detectPdfInfoPageCount(sourcePath);
+let buffer = null;
+const readSourceBuffer = async () => {
+ if (buffer) return buffer;
+ buffer = await readFile(sourcePath);
+ return buffer;
+};
 const baseName = path.basename(sourcePath);
 if (options.onProgress) {
 options.onProgress("Detecting PDF text layer", 10);
@@ -112,6 +212,11 @@ result.attempts.push(attempt);
 const runBuiltInExtraction = async ({ lateFallback = false } = {}) => {
 if (builtInRan) return;
 builtInRan = true;
+if (largeInput && options.allowLargePageWindow) {
+ const error = new Error("Large PDF requires the page-window layout backend; full-buffer extraction is disabled for this input.");
+ error.code = "PDF_INPUT_LIMIT";
+ throw error;
+}
 builtInStart = Date.now();
 if (options.onProgress) {
 options.onProgress(
@@ -120,21 +225,45 @@ lateFallback ? 94 : 25
 );
 }
 try {
+if (options.assertNotCancelled) await options.assertNotCancelled();
+ const sourceBuffer = await readSourceBuffer();
 if (options.converter && typeof options.converter.convert === "function") {
-const convResult = await options.converter.convert({ sourcePath });
-builtInMarkdown = convResult.markdown;
+const convResult = await options.converter.convert({
+ sourcePath,
+ inputStat,
+  buffer: sourceBuffer,
+ maxDecompressedBytes: options.maxDecompressedBytes,
+ maxInputBytes: options.maxInputBytes,
+ assertNotCancelled: options.assertNotCancelled
+});
+ builtInMarkdown = convResult.markdown;
+  result.pageCount = convResult.pageCount || result.pageCount;
+  result.pageLedger = convResult.pageLedger || result.pageLedger || null;
+  if (result.pageLedger && result.pageLedger.sourcePageCount === null && Number.isInteger(result.pageCount) && result.pageCount > 0) {
+   result.pageLedger = { ...result.pageLedger, sourcePageCount: result.pageCount, pageCountKnown: true };
+  }
 if (convResult.warnings) {
 result.warnings.push(...convResult.warnings);
 }
 } else {
-builtInMarkdown = await pdfBufferToMarkdown(buffer, baseName);
+  builtInMarkdown = await pdfBufferToMarkdown(sourceBuffer, baseName, {
+  maxDecompressedBytes: options.maxDecompressedBytes,
+  assertNotCancelled: options.assertNotCancelled
+ });
+  result.pageCount = detectPdfPageCount(sourceBuffer);
 }
 hasText = Boolean(pdfBodyText(builtInMarkdown)) && !builtInMarkdown.includes("no simple text layer");
 lowReadable = hasText && hasLowReadableText(builtInMarkdown);
 builtInSemanticLoss = analyzePdfSemanticLoss(builtInMarkdown);
 result.stats.semanticLoss = builtInSemanticLoss;
-} catch (e) {
-builtInError = e.message;
+ } catch (e) {
+ if (isCancellationError(e) || e?.code === "PDF_BUDGET_INVALID") throw e;
+ builtInError = e.message;
+ if (e?.code === "PDF_DECOMPRESSION_LIMIT" || e?.code === "PDF_INPUT_LIMIT") {
+ // A document that exceeds the bounded decompression budget is deliberately
+ // stopped before layout/OCR fallbacks can allocate another full copy.
+ throw e;
+}
 hasText = false;
 lowReadable = true;
 }
@@ -150,7 +279,7 @@ lowReadableText: lowReadable,
 warning: builtInError || (status === "low_readable" ? "Low-readable text detected" : "")
 });
 };
-if (preferred === "auto" || preferred === "built-in" || preferred === "marker" || preferred === "scientific") {
+if ((preferred === "auto" && !pageBackendFirst) || preferred === "built-in" || preferred === "marker" || preferred === "scientific") {
 await runBuiltInExtraction();
 if (hasText && !lowReadable && !builtInSemanticLoss.formulaDamageLikely && preferred !== "marker" && preferred !== "scientific") {
 result.markdown = builtInMarkdown;
@@ -161,6 +290,8 @@ result.stats.characters = builtInMarkdown.length;
 if (options.onProgress) {
 options.onProgress("Readable Markdown generated by built-in", 100);
 }
+if (options.assertNotCancelled) await options.assertNotCancelled();
+attachResources();
 return result;
 }
 if (hasText && !lowReadable && builtInSemanticLoss.formulaDamageLikely) {
@@ -183,6 +314,7 @@ options.onProgress(lowReadable ? "Built-in output is low-readable" : "Built-in o
 }
 const markerRequested = preferred === "marker" || (preferred === "auto" && process.env.SCHEMA_DOCS_PDF_RICH_AUTO === "1");
 if (markerRequested) {
+if (options.assertNotCancelled) await options.assertNotCancelled();
 const markerStart = Date.now();
 const markerDetection = options.mockMarkerAvailable !== undefined
 ? { available: options.mockMarkerAvailable, command: options.markerCommand || "marker_single", version: "mock" }
@@ -242,9 +374,11 @@ assetRoot: markerResult.outputDir
 result.richAssetRoot = markerResult.outputDir;
 result.warnings.push("High-fidelity local PDF extraction produced Markdown with LaTeX equations, tables, and linked image assets. Review complex pages against the retained source PDF.");
 if (options.onProgress) options.onProgress("High-fidelity Markdown generated", 100);
+attachResources();
 return result;
 }
 } catch (error) {
+if (isCancellationError(error)) throw error;
 result.attempts.push({
 name: "marker",
 available: true,
@@ -271,10 +405,16 @@ result.warnings.push("The optional developer-only Marker reconstruction runtime 
 }
 }
 const layoutStart = Date.now();
+const configuredPageWindowSize = Number(options.pageWindowSize || process.env.SCHEMA_DOCS_PDF_PAGE_WINDOW || 0);
+const pageWindowSize = configuredPageWindowSize > 0
+ ? Math.max(1, Math.min(32, configuredPageWindowSize))
+ : (largeInput || Number(result.pageCount || 0) > 1200 || Number(inputStat.size) > 180 * 1024 * 1024 ? 4
+   : (Number(inputStat.size) > 80 * 1024 * 1024 ? 8 : 16));
 const layoutDetection = options.mockPdfLayoutAvailable !== undefined
 ? { available: options.mockPdfLayoutAvailable, command: options.pythonPath || "python", args: [], version: "mock" }
 : await detectPdfLayoutExtractor({ pythonPath: options.pythonPath });
 if ((preferred === "auto" || preferred === "pdfplumber" || preferred === "scientific") && layoutDetection.available) {
+if (options.assertNotCancelled) await options.assertNotCancelled();
 if (options.onProgress) options.onProgress("Trying layout-aware PDF extraction", 52);
 try {
 const layoutResult = options.mockPdfLayout !== undefined
@@ -282,17 +422,61 @@ const layoutResult = options.mockPdfLayout !== undefined
 : await extractPdfWithLayout(sourcePath, {
 detection: layoutDetection,
 timeoutMs: options.layoutTimeoutMs,
+maxResidentBytes: options.maxResidentBytes,
+maxWorkerResidentBytes: options.maxWorkerResidentBytes,
+maxTemporaryBytes: options.maxTemporaryBytes,
+pageTimeoutMs: options.ocrPageTimeoutMs,
+regionTimeoutMs: options.ocrRegionTimeoutMs,
 assetDir: options.layoutAssetDir,
+cacheDir: options.layoutCacheDir,
+assertNotCancelled: options.assertNotCancelled,
+onPageComplete: options.onLayoutPage,
+onHeartbeat: heartbeat => observeHeartbeat("layout", heartbeat),
+heartbeatMs: options.heartbeatMs,
+startPage: options.layoutStartPage,
+maxPages: options.layoutMaxPages,
+pageWindowSize,
 formulaOcr: preferred === "scientific",
 formulaOcrPython: options.formulaOcrPython,
 formulaOcrBatchSize: options.formulaOcrBatchSize,
 formulaOcrTimeoutMs: options.formulaOcrTimeoutMs
 });
+const scanPages = (layoutResult.visualMap?.pages || []).filter(page => page.requiresOcr).map(page => page.page);
+if (scanPages.length) {
+ const detection = await detectPdfOcrAdapter({ pythonPath: options.pythonPath });
+ if (detection.native) {
+  try {
+   const ocr = await extractPdfWithOcr(sourcePath, { detection, pageNumbers: scanPages,
+    pageRegions: Object.fromEntries(layoutResult.visualMap.pages.filter(p=>scanPages.includes(p.page)).map(p=>[p.page,{coordinateOrigin:p.coordinateOrigin || [0,0],regions:p.ocrRegions}])),
+    languages: options.ocrLanguages, cacheDir: options.ocrCacheDir, dpi: options.ocrDpi,
+    regionBatchSize: options.ocrRegionBatchSize,
+    timeoutMs: options.ocrTimeoutMs,
+    maxResidentBytes: options.maxResidentBytes,
+maxWorkerResidentBytes: options.maxWorkerResidentBytes,
+maxTemporaryBytes: options.maxTemporaryBytes,
+pageTimeoutMs: options.ocrPageTimeoutMs,
+regionTimeoutMs: options.ocrRegionTimeoutMs, omitMarkdown: true,
+    assertNotCancelled: options.assertNotCancelled,
+    onProgress: progress => options.onProgress?.(`OCR page ${progress.page} of ${progress.totalPages}`,
+      75 + Math.round(20 * (progress.pagesProcessed || 0) / Math.max(1, progress.pagesRequested || 1)), progress),
+    onHeartbeat: heartbeat => observeHeartbeat("ocr", heartbeat) });
+   mergeOcrPages(layoutResult, ocr);
+  } catch (error) {
+   if (isCancellationError(error)) throw error;
+   result.warnings.push(`Scanned pages need OCR: ${error.message}`);
+  }
+ }
+ const pending = layoutResult.visualMap.pages.filter(page => page.requiresOcr).length;
+ layoutResult.visualMap.summary.pendingOcrPages = pending;
+ if (pending) result.warnings.push(`${pending} pages still have OCR regions pending; native text and source images were retained.`);
+}
 const layoutLowReadable = hasLowReadableText(layoutResult.markdown);
 const layoutSemanticLoss = analyzePdfSemanticLoss(layoutResult.markdown);
+const layoutHasPageStructure = Number(layoutResult.visualMap?.pagesAnalyzed || 0) > 0
+&& Array.isArray(layoutResult.visualMap?.pages);
 const layoutBetter = !layoutLowReadable
 && layoutResult.markdown.trim()
-&& (preferred === "scientific" || !hasText || lowReadable || layoutSemanticLoss.score < builtInSemanticLoss.score);
+&& (preferred === "scientific" || !hasText || lowReadable || layoutSemanticLoss.score < builtInSemanticLoss.score || layoutHasPageStructure);
 result.attempts.push({
 name: "pdfplumber",
 available: true,
@@ -311,7 +495,52 @@ result.textLayerDetected = true;
 result.lowReadableText = false;
 result.stats.characters = layoutResult.markdown.length;
 result.stats.semanticLoss = layoutSemanticLoss;
+result.stats.layoutCache = layoutResult.visualMap?.cache || null;
+result.stats.ocr = layoutResult.ocr || null;
+if (layoutResult.visualMap?.summary?.visualFallbackRegions) {
+ result.warnings.push(`${layoutResult.visualMap.summary.visualFallbackRegions} regions require source-image review; visual preservation is not editable recognition.`);
+}
+if (layoutResult.visualMap?.summary?.failedVisualRegions) {
+ result.warnings.push(`${layoutResult.visualMap.summary.failedVisualRegions} source-region images could not be rendered.`);
+}
 result.visualMap = layoutResult.visualMap;
+if (options.mockPdfLayout === undefined) result.assetValidation = await validatePdfAssets(result, options.layoutAssetDir, layoutDetection);
+result.pageCount = layoutResult.visualMap?.pageCount || result.pageCount;
+const qualityStatusByPage = new Map((layoutResult.visualMap?.pages || []).map((page) => {
+ const pageNumber = Number(page.page);
+ const quality = derivePdfPageQuality(page);
+ return [pageNumber, quality.qualityStatus];
+}));
+const pageStatusCounts = [...qualityStatusByPage.values()].reduce((counts, status) => {
+ counts[status] = (counts[status] || 0) + 1;
+ return counts;
+}, {});
+const unresolvedPages = [...qualityStatusByPage.values()].filter((status) => status === "unresolved").length;
+const reviewPages = [...qualityStatusByPage.values()].filter((status) => status === "ocr_review_required").length;
+result.extractionQuality = {
+ ...(result.extractionQuality || {}),
+ pageStatusCounts,
+ unresolvedPages,
+ reviewPages,
+ ocrReviewRegions: Number(layoutResult.visualMap?.summary?.ocrReviewRegions || 0),
+ pendingOcrPages: Number(layoutResult.visualMap?.summary?.pendingOcrPages || 0),
+ ocrPages: Number(layoutResult.visualMap?.summary?.ocrPages || pageStatusCounts.ocr_completed || 0)
+};
+result.extractionQuality.failedVisualRegions = Number(layoutResult.visualMap?.summary?.failedVisualRegions || 0);
+result.extractionQuality.failedVisualPages = (layoutResult.visualMap?.pages || [])
+ .filter(page => (page.regions || []).some(region => region.assetStatus === "failed"))
+ .map(page => Number(page.page));
+result.pageLedger = createPdfPageLedgerFromMarkdown(
+ layoutResult.markdown,
+ Number.isInteger(result.pageCount) ? result.pageCount : null,
+ { qualityStatusByPage }
+);
+if (Number.isInteger(result.pageCount)
+ && Number.isInteger(layoutResult.visualMap?.pagesAnalyzed)
+ && layoutResult.visualMap.pagesAnalyzed < result.pageCount) {
+ result.partial = true;
+ result.warnings.push(`Only PDF pages ${layoutResult.visualMap.pageRange?.start || 1}-${layoutResult.visualMap.pageRange?.end || layoutResult.visualMap.pagesAnalyzed} were processed; remaining pages require a resumed page-window job.`);
+}
  result.warnings.push(layoutSemanticLoss.formulaDamageLikely
  ? "Layout-aware PDF extraction improved the text layout, but mathematical font encoding is still damaged. Do not rely on formulas until a high-fidelity reconstruction is used."
  : "Layout-aware PDF extraction preserved page markers and recovered mathematical glyphs that were damaged in the built-in text stream.");
@@ -331,9 +560,11 @@ if (layoutResult.visualMap?.summary?.tableRegions) {
 result.warnings.push(`${layoutResult.visualMap.summary.tableRegions} table regions were mapped and emitted as Markdown tables with source coordinates retained.`);
 }
 if (options.onProgress) options.onProgress("Layout-aware Markdown generated", 100);
+attachResources();
 return result;
 }
 } catch (error) {
+if (isCancellationError(error)) throw error;
 result.attempts.push({
 name: "pdfplumber",
 available: true,
@@ -345,6 +576,10 @@ warning: error.message
 });
 result.stats.fallbacksTried.push("pdfplumber");
 result.warnings.push(`Layout-aware PDF extraction failed: ${error.message}`);
+// Unexpected parser/worker failures must be visible to the task. Falling
+// through here used to discard all committed graphics and OCR the whole book.
+throw Object.assign(error, { code: error.code || "PDF_LAYOUT_FAILED", backend: "pdfplumber",
+ attempts: result.attempts, resources: resourceTracker });
 }
 } else {
 result.attempts.push({
@@ -403,9 +638,11 @@ result.stats.characters = pdftotextMarkdown.length;
 if (options.onProgress) {
 options.onProgress("Readable Markdown generated by pdftotext.", 100);
 }
+attachResources();
 return result;
 }
 } catch (e) {
+if (isCancellationError(e)) throw e;
 result.warnings.push(`pdftotext failed: ${e.message}`);
 result.attempts.push({
 name: "pdftotext",
@@ -475,9 +712,11 @@ result.stats.characters = mutoolMarkdown.length;
 if (options.onProgress) {
 options.onProgress("Readable Markdown generated by mutool.", 100);
 }
+attachResources();
 return result;
 }
 } catch (e) {
+if (isCancellationError(e)) throw e;
 result.warnings.push(`mutool failed: ${e.message}`);
 result.attempts.push({
 name: "mutool",
@@ -547,9 +786,11 @@ result.stats.characters = pandocMarkdown.length;
 if (options.onProgress) {
 options.onProgress("Readable Markdown generated by pandoc.", 100);
 }
+attachResources();
 return result;
 }
 } catch (e) {
+if (isCancellationError(e)) throw e;
 result.warnings.push(`pandoc failed: ${e.message}`);
 result.attempts.push({
 name: "pandoc",
@@ -575,6 +816,7 @@ warning: shouldTryPandoc ? "Command not available" : "Skipped via preferred extr
 }
 const shouldTryOcr = (preferred === "auto" || preferred === "ocr") && (!hasText || lowReadable);
 if (shouldTryOcr) {
+if (options.assertNotCancelled) await options.assertNotCancelled();
 const ocrStart = Date.now();
 const ocrDetection = options.mockOcrAvailable !== undefined
 ? { available: options.mockOcrAvailable }
@@ -587,19 +829,35 @@ const ocrResult = options.mockOcrMarkdown !== undefined
 markdown: options.mockOcrMarkdown,
 pageCount: options.mockOcrPageCount || 1,
 pagesProcessed: options.mockOcrPageCount || 1,
-failedPages: []
+ failedPages: Array.isArray(options.mockOcrFailedPages)
+ ? options.mockOcrFailedPages.map((page) => ({ page: Number(page), error: "mock OCR failure" }))
+ : []
 }
 : await extractPdfWithOcr(sourcePath, {
 detection: ocrDetection,
+cacheDir: options.ocrCacheDir,
+assertNotCancelled: options.assertNotCancelled,
 languages: options.ocrLanguages,
 dpi: options.ocrDpi,
 pageTimeoutMs: options.ocrPageTimeoutMs,
-onProgress: ({ percent, page, endPage }) => {
-if (options.onProgress) options.onProgress(`OCR page ${page} of ${endPage}`, 85 + Math.round(percent * 0.14));
+timeoutMs: options.ocrTimeoutMs,
+maxResidentBytes: options.maxResidentBytes,
+maxWorkerResidentBytes: options.maxWorkerResidentBytes,
+maxTemporaryBytes: options.maxTemporaryBytes,
+pageTimeoutMs: options.ocrPageTimeoutMs,
+regionTimeoutMs: options.ocrRegionTimeoutMs,
+onHeartbeat: heartbeat => observeHeartbeat("ocr", heartbeat),
+onProgress: ({ percent, page, totalPages, endPage }) => {
+if (options.onProgress) options.onProgress(`OCR page ${page} of ${totalPages || endPage}`, 85 + Math.round(percent * 0.14));
 }
 });
+if (options.onProgress && ocrResult.failedPages?.length) {
+for (const failedPage of ocrResult.failedPages) {
+options.onProgress(`OCR failed page ${failedPage.page} of ${ocrResult.pageCount}`, 85);
+}
+}
 const ocrLowReadable = hasLowReadableText(ocrResult.markdown);
-const ocrSuccess = ocrResult.markdown.trim() && !ocrLowReadable;
+const ocrSuccess = ocrResult.markdown.trim() && !ocrLowReadable && ocrResult.extractedCharacters !== 0;
 result.attempts.push({
 name: "tesseract-ocr",
 available: true,
@@ -620,17 +878,45 @@ result.lowReadableText = false;
 result.stats.characters = ocrResult.markdown.length;
 result.stats.semanticLoss = analyzePdfSemanticLoss(ocrResult.markdown);
 result.stats.ocr = {
+resources: ocrResult.resources,
 pageCount: ocrResult.pageCount,
 pagesProcessed: ocrResult.pagesProcessed,
 failedPages: ocrResult.failedPages?.length || 0,
 languages: ocrResult.languages || options.ocrLanguages || "auto"
 };
+result.pageCount = ocrResult.pageCount || result.pageCount;
+const ocrQualityStatusByPage = new Map((ocrResult.pages || []).map((page) => [
+ Number(page.page),
+ page.status === "completed" && String(page.text || "").trim() ? "ocr_completed" : "ocr_required"
+]));
+result.extractionQuality = {
+ ...(result.extractionQuality || {}),
+ pageStatusCounts: [...ocrQualityStatusByPage.values()].reduce((counts, status) => {
+  counts[status] = (counts[status] || 0) + 1;
+  return counts;
+ }, {}),
+ pendingOcrPages: [...ocrQualityStatusByPage.values()].filter((status) => status === "ocr_required").length,
+ ocrPages: [...ocrQualityStatusByPage.values()].filter((status) => status === "ocr_completed").length
+};
+result.pageLedger = createPdfPageLedgerFromMarkdown(result.markdown, result.pageCount, {
+ qualityStatusByPage: ocrQualityStatusByPage
+});
+if (ocrResult.pages) result.visualMap = {
+ schema: "schema-docs.pdf-visual-map.v2", pageCount: result.pageCount, pagesAnalyzed: ocrResult.pagesProcessed,
+ pageRange: ocrResult.pageRange,
+ summary: { ocrPages: ocrResult.pages.filter(p => p.status === "completed" && p.text.trim()).length,
+  pendingOcrPages: ocrResult.pages.filter(p => p.status !== "completed" || !p.text.trim()).length },
+ pages: ocrResult.pages.map(p => ({ page: p.page, width: p.width, height: p.height, regions: [],
+  ocr: p, requiresOcr: p.status !== "completed" || !p.text.trim() }))
+};
 result.warnings.push("Text was recovered with local OCR. Formula notation, tables, handwriting, and reading order still require visual review against the original PDF.");
 if (ocrResult.failedPages?.length) result.warnings.push(`${ocrResult.failedPages.length} PDF pages could not be OCR-processed and remain explicitly marked in Markdown.`);
 if (options.onProgress) options.onProgress("OCR Markdown generated", 100);
+attachResources();
 return result;
 }
 } catch (error) {
+if (isCancellationError(error)) throw error;
 result.attempts.push({
 name: "tesseract-ocr",
 available: true,
@@ -720,5 +1006,11 @@ result.warnings.push("All extraction fallbacks produced low-readable text. OCR r
 if (options.onProgress) {
 options.onProgress("Done", 100);
 }
+if (largeInput && !String(result.markdown || "").trim()) {
+ const error = new Error("Large PDF could not be processed by the page-window backend; no full-buffer fallback was attempted.");
+ error.code = "PDF_LAYOUT_ADAPTER_UNAVAILABLE";
+ throw error;
+}
+attachResources();
 return result;
 }

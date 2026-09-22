@@ -125,6 +125,10 @@ test("desktop-release-preflight writes a handoff evidence package without launch
   assert.ok(handoffSummary.releaseCommands.includes("npm run public-preview-package -- --json"));
   assert.ok(handoffSummary.releaseCommands.includes("npm run release-artifacts"));
   assert.ok(handoffSummary.releaseCommands.some((command) => command.includes("desktop-verification-fill")));
+  assert.ok(handoffSummary.releaseCommands.some((command) => command.includes("--spreadsheet-preview-evidence")));
+  assert.ok(handoffSummary.releaseCommands.some((command) => command.includes("--workspace-images-evidence")));
+  assert.ok(handoffSummary.releaseCommands.some((command) => command.includes("--save-picker-evidence")));
+  assert.ok(handoffSummary.releaseCommands.some((command) => command.includes("--segmented-html-export-evidence")));
   assert.equal(handoffSummary.portableEvidence.desktopVerificationRecord, "desktop-verification-record.partial.json");
   assert.equal(handoffSummary.portableEvidence.strictPreview, "desktop-verification.strict-preview.json");
   assert.equal(handoffSummary.portableEvidence.handoff, "desktop-handoff.md");
@@ -148,6 +152,11 @@ test("desktop-release-preflight writes a handoff evidence package without launch
   assert.match(handoff, /Release Command Checklist/);
   assert.match(handoff, /npm run public-preview-package -- --json/);
   assert.match(handoff, /desktop-verification-fill/);
+  assert.match(handoff, /--spreadsheet-preview-evidence/);
+  assert.match(handoff, /--workspace-images-evidence/);
+  assert.match(handoff, /--save-picker-evidence/);
+  assert.match(handoff, /--segmented-html-export-evidence/);
+  assert.match(handoff, /naturalWidth > 0/);
   assert.match(handoff, /Manual Verification Steps/);
   assert.match(handoff, /Confirm WebView2/);
   assert.match(handoff, /--webview2-present yes/);
@@ -322,6 +331,50 @@ test("desktop-verification-fill creates a strict-checkable record from explicit 
       return true;
     }
   );
+  const regressionEvidence = {
+    spreadsheetPreview: {
+      status: "pass",
+      realRowsVisible: true,
+      multipleSheetsVisible: true,
+      sheetSwitchWorked: true,
+      notes: "Real rows visibly changed between Sheet1 and Sheet2."
+    },
+    workspaceImages: {
+      status: "pass",
+      pptxNaturalWidthPositive: true,
+      pptxBrokenImageAbsent: true,
+      pdfNaturalWidthPositive: true,
+      pdfBrokenImageAbsent: true,
+      notes: "Visible PPTX and PDF images each had naturalWidth greater than zero."
+    },
+    savePicker: {
+      status: "pass",
+      pickerVisible: true,
+      boundToMainWindow: true,
+      cancelRestoredApp: true,
+      notes: "Cancelling the owned save picker restored the responsive main window."
+    },
+    segmentedHtmlExport: {
+      status: "pass",
+      segmentedPdfSelected: true,
+      allSegmentsIncluded: true,
+      htmlFileWritten: true,
+      htmlFileNonEmpty: true,
+      notes: "The saved non-empty HTML included the first and last PDF segments."
+    }
+  };
+  const regressionEvidenceArgs = [];
+  const regressionOptionByKey = {
+    spreadsheetPreview: "--spreadsheet-preview-evidence",
+    workspaceImages: "--workspace-images-evidence",
+    savePicker: "--save-picker-evidence",
+    segmentedHtmlExport: "--segmented-html-export-evidence"
+  };
+  for (const [key, evidence] of Object.entries(regressionEvidence)) {
+    const evidencePath = path.join(workspace, `${key}.json`);
+    await writeFile(evidencePath, JSON.stringify(evidence, null, 2));
+    regressionEvidenceArgs.push(regressionOptionByKey[key], evidencePath);
+  }
   const filled = await execFileAsync(process.execPath, [
     desktopVerificationFillPath,
     "--record",
@@ -330,6 +383,7 @@ test("desktop-verification-fill creates a strict-checkable record from explicit 
     "--first-workflow-pass",
     "--workspace-picker-pass",
     "--file-picker-pass",
+    ...regressionEvidenceArgs,
     "--result-pass",
     "--tester",
     "desktop-tester",
@@ -361,6 +415,10 @@ test("desktop-verification-fill creates a strict-checkable record from explicit 
   assert.equal(filledRecord.visibleUi.firstWorkflow.readBackValid, true);
   assert.equal(filledRecord.visibleUi.workspacePicker.workspaceOpened, true);
   assert.equal(filledRecord.visibleUi.filePicker.importSucceeded, true);
+  assert.deepEqual(filledRecord.visibleUi.spreadsheetPreview, regressionEvidence.spreadsheetPreview);
+  assert.deepEqual(filledRecord.visibleUi.workspaceImages, regressionEvidence.workspaceImages);
+  assert.deepEqual(filledRecord.visibleUi.savePicker, regressionEvidence.savePicker);
+  assert.deepEqual(filledRecord.visibleUi.segmentedHtmlExport, regressionEvidence.segmentedHtmlExport);
   assert.equal(filledRecord.result.status, "pass");
   assert.equal(filledRecord.result.tester, "desktop-tester");
   assert.equal(filledRecord.environment.windowsVersion, "Windows 11 23H2 Build 22631");

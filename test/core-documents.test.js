@@ -10,12 +10,13 @@ import { attachPdfImagesToMarkdown, convertDocumentToMarkdownAsJob } from "../sr
 import { decodeTextBuffer, textMarkdownConverter, textToMarkdown } from "../src/adapters/textMarkdownConverter.js";
 import { docxDocumentXmlToMarkdown, docxMarkdownConverter } from "../src/adapters/docxMarkdownConverter.js";
 import { markdownToDocxBuffer } from "../src/adapters/markdownDocxExporter.js";
-import { markdownToPdfBuffer, pdfBufferToMarkdown, pdfMarkdownConverter } from "../src/adapters/pdfMarkdownConverter.js";
+import { assertPdfInputSize, detectPdfPageCount, markdownToPdfBuffer, pdfBufferToMarkdown, pdfMarkdownConverter } from "../src/adapters/pdfMarkdownConverter.js";
 import { runPdfExtractionPipeline } from "../src/adapters/pdfExtractorPipeline.js";
+import { createPdfPageLedgerFromMarkdown } from "../src/adapters/pdfPageBackend.js";
 import { extractPdfWithMarker, rewriteMarkerLocalAssets } from "../src/adapters/pdfMarkerExtractor.js";
 import { createAppService } from "../src/core/appService.js";
 import { deleteConversionAudit, listConversionAudits } from "../src/core/conversionAudits.js";
-import { exportMarkdownDocument } from "../src/core/documentExports.js";
+import { exportMarkdownDocument, exportSegmentedMarkdownToHtmlDocument } from "../src/core/documentExports.js";
 import {
   getDocumentExchangeCapability,
   listDocumentExchangeCapabilities,
@@ -25,6 +26,7 @@ import {
 import { getEvidenceLogPath, getEvidenceRecord, listEvidenceRecords } from "../src/core/evidence.js";
 import { createDocumentCapabilityManifest } from "../src/core/capabilityManifest.js";
 import { createReadableMarkdown, splitReadableMarkdown } from "../src/core/readableMarkdown.js";
+import { readDocumentIr } from "../src/core/documentIrStore.js";
 import { listZipEntries, readZipEntry } from "../src/core/zip.js";
 import { buildZip } from "./helpers/zipBuilder.js";
 async function tempDir(prefix) {
@@ -227,12 +229,13 @@ test("converts docx document xml to markdown", () => {
   assert.match(markdown, /\| Alpha \| 1 \|/);
   assert.match(markdown, /\*\*Important\*\* and \*emphasis\* with \[link\]\(https:\/\/example\.com\)/);
   assert.match(markdown, /^  - Nested list item$/m);
-  assert.match(markdown, /!\[Embedded image omitted\]\(image\)/);
+  assert.match(markdown, /\[Drawing not converted; inspect the original Word document\]/);
   assert.match(markdown, /Claim with footnote\[\^footnote-2\]/);
   assert.match(markdown, /Appendix marker\[\^endnote-3\]/);
   assert.match(markdown, /\[\^footnote-2\]: Footnote body/);
   assert.match(markdown, /\[\^endnote-3\]: Endnote body/);
-  assert.match(markdown, /\| Wide Header \| Column 2 \| Value \|/);
+  assert.match(markdown, /\| Wide Header \|  \| Value \|/);
+  assert.match(markdown, /"spans":\[\[0,0,1,2\]\]/);
   assert.match(markdown, /Plain text in bold wrapper/);
   assert.ok(!markdown.includes("**Plain text in bold wrapper**"));
   assert.match(markdown, /Whole paragraph bold should read as plain body\./);
@@ -304,7 +307,7 @@ test("preserves DOCX and WPS images plus editable OMML formulas", async () => {
   assert.match(markdown, /!\[Word image\]\(<assets\/rich\.docx\/image1\.png>\)/);
   assert.match(readableMarkdown, /!\[Word image\]\(<\.\.\/assets\/rich\.docx\/image1\.png>\)/);
   assert.match(markdown, /\\frac\{x\}\{\{y\}\^\{2\}\}/);
-  assert.deepEqual(await readFile(path.join(workspace, "outputs", "assets", "rich.docx", "image1.png")), image);
+  assert.deepEqual(await readFile(path.join(path.dirname(document.outputMarkdownPath), "assets", "rich.docx", "image1.png")), image);
   assert.ok(!document.extractionQuality.unsupportedFeatures.includes("images"));
   assert.ok(!document.extractionQuality.unsupportedFeatures.includes("formulas"));
   const markdownRelativePath = path.relative(workspace, document.outputMarkdownPath);
@@ -316,6 +319,145 @@ test("preserves DOCX and WPS images plus editable OMML formulas", async () => {
   assert.match(readZipEntry(docxBuffer, "word/document.xml").toString("utf8"), /<m:oMath/);
   assert.match(await readFile(exportedHtml, "utf8"), /data:image\/png;base64,/);
   assert.match((await readFile(exportedPdf)).toString("latin1"), /%PDF-1\.4/);
+});
+test("streams segmented Markdown into one self-contained HTML file", async () => {
+  const workspace = await tempDir("lft-segmented-html-");
+  await openOrCreateWorkspace(workspace);
+  const segmentDir = path.join(workspace, "outputs", "readable");
+  const image = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/l4QW2QAAAABJRU5ErkJggg==", "base64");
+  await mkdir(segmentDir, { recursive: true });
+  await writeFile(path.join(segmentDir, "visual.png"), image);
+  await writeFile(path.join(segmentDir, "part-001.md"), [
+    "> Human Markdown segment 1/2.",
+    "> Source line range: 1-10",
+    "",
+    "# Complete document",
+    "",
+    "| Value | Formula |",
+    "| --- | --- |",
+    "| one | $E=mc^2$ |",
+    "",
+    "![First](visual.png)",
+    "",
+    "```js",
+    "const price = '$5';"
+  ].join("\n"));
+  await writeFile(path.join(segmentDir, "part-002.md"), [
+    "> Human Markdown segment 2/2.",
+    "> Source line range: 11-20",
+    "",
+    "console.log(price);",
+    "```",
+    "",
+    "## Ending",
+    "",
+    "![Second](visual.png)",
+    "",
+    "[Reference link][complete-doc]",
+    "",
+    "[complete-doc]: https://example.invalid/complete"
+  ].join("\n"));
+  const segments = ["outputs/readable/part-001.md", "outputs/readable/part-002.md"];
+  const result = await exportSegmentedMarkdownToHtmlDocument(
+    workspace,
+    segments,
+    "exports/complete.html",
+    { avoidOverwrite: true, title: "Complete" }
+  );
+  const html = await readFile(result.outputPath, "utf8");
+  assert.equal(result.segmentCount, 2);
+  assert.equal(result.uniqueImageCount, 1);
+  assert.equal(result.imageOccurrences, 2);
+  assert.equal(result.renderedChunkCount, 1);
+  assert.equal(result.outputBytes, Buffer.byteLength(html));
+  assert.match(html, /<title>Complete<\/title>/);
+  assert.match(html, /<table>/);
+  assert.match(html, /class="katex-inline-math"/);
+  assert.match(html, /<pre><code class="language-js">const price = '\$5';\nconsole\.log\(price\);/);
+  assert.match(html, /href="https:\/\/example\.invalid\/complete"/);
+  assert.equal((html.match(/data:image\/png;base64,/g) || []).length, 2);
+  assert.doesNotMatch(html, /Human Markdown segment|Source line range|schema_docs_9f43c4e1_stream_image/);
+  const second = await exportSegmentedMarkdownToHtmlDocument(
+    workspace,
+    segments,
+    "exports/complete.html",
+    { avoidOverwrite: true }
+  );
+  assert.match(second.outputPath, /complete \(2\)\.html$/);
+});
+test("segmented HTML preserves tables and lists across source-part boundaries", async () => {
+  const workspace = await tempDir("lft-segmented-blocks-");
+  await openOrCreateWorkspace(workspace);
+  const segmentDir = path.join(workspace, "outputs", "readable");
+  await mkdir(segmentDir, { recursive: true });
+  await writeFile(path.join(segmentDir, "part-001.md"), [
+    "> Human Markdown segment 1/3.",
+    "> Source line range: 1-3",
+    "",
+    "| Item | Value |",
+    "| --- | --- |",
+    "| one | 1 |"
+  ].join("\n"));
+  await writeFile(path.join(segmentDir, "part-002.md"), [
+    "> Human Markdown segment 2/3.",
+    "> Source line range: 4-6",
+    "",
+    "| two | 2 |",
+    "",
+    "1. first"
+  ].join("\n"));
+  await writeFile(path.join(segmentDir, "part-003.md"), [
+    "> Human Markdown segment 3/3.",
+    "> Source line range: 7-8",
+    "",
+    "2. second",
+    ""
+  ].join("\n"));
+  const result = await exportSegmentedMarkdownToHtmlDocument(
+    workspace,
+    [
+      "outputs/readable/part-001.md",
+      "outputs/readable/part-002.md",
+      "outputs/readable/part-003.md"
+    ],
+    "exports/blocks.html",
+    { title: "Cross-segment blocks" }
+  );
+  const html = await readFile(result.outputPath, "utf8");
+  assert.equal(result.renderedChunkCount, 1);
+  assert.equal((html.match(/<table>/g) || []).length, 1);
+  assert.match(html, /<td>two<\/td>\s*<td>2<\/td>/);
+  assert.equal((html.match(/<ol>/g) || []).length, 1);
+  assert.match(html, /<li>first<\/li>\s*<li>second<\/li>/);
+});
+test("segmented HTML restores legacy paragraph breaks from generated source ranges", async () => {
+  const workspace = await tempDir("lft-segmented-paragraphs-");
+  await openOrCreateWorkspace(workspace);
+  const source = `${"A".repeat(19998)}\n\nSecond paragraph`;
+  const split = splitReadableMarkdown(source, {
+    maxCharacters: 20000,
+    minCharactersForSplit: 20001
+  });
+  assert.equal(split.segments.length, 2);
+  assert.equal(split.segments[0].endLine, 2);
+  assert.match(split.segments[0].markdown, /A\n\n$/);
+  const segmentDir = path.join(workspace, "outputs", "readable");
+  await mkdir(segmentDir, { recursive: true });
+  const relativePaths = [];
+  for (const segment of split.segments) {
+    const fileName = `legacy-${segment.index}.md`;
+    await writeFile(path.join(segmentDir, fileName), segment.markdown.trimEnd() + "\n");
+    relativePaths.push(`outputs/readable/${fileName}`);
+  }
+  const result = await exportSegmentedMarkdownToHtmlDocument(
+    workspace,
+    relativePaths,
+    "exports/paragraphs.html",
+    { title: "Legacy paragraph boundary" }
+  );
+  const html = await readFile(result.outputPath, "utf8");
+  assert.equal((html.match(/<p>/g) || []).length, 2);
+  assert.match(html, /<\/p>\s*<p>Second paragraph<\/p>/);
 });
 test("preserves DOCX ordered numbering and OLE preview images", () => {
   const documentXml = `<w:document xmlns:w="word" xmlns:r="rels" xmlns:v="v" xmlns:o="o"><w:body>
@@ -333,6 +475,19 @@ test("preserves DOCX ordered numbering and OLE preview images", () => {
   assert.match(markdown, /^2\. Second note$/m);
   assert.match(markdown, /!\[Word image\]\(<assets\/formula\.png>\)/);
   assert.ok(!markdown.includes("Embedded object omitted"));
+});
+test("preserves source whitespace and word boundaries across DOCX formatting runs", () => {
+  const documentXml = `<w:document xmlns:w="word"><w:body>
+    <w:p><w:r><w:rPr><w:b/></w:rPr><w:t>alpha</w:t></w:r><w:r><w:t xml:space="preserve"> </w:t></w:r><w:r><w:rPr><w:b/></w:rPr><w:t>beta</w:t></w:r></w:p>
+    <w:p><w:r><w:rPr><w:b/></w:rPr><w:t>12</w:t></w:r><w:r><w:t xml:space="preserve"> </w:t></w:r><w:r><w:rPr><w:b/></w:rPr><w:t>34</w:t></w:r></w:p>
+    <w:p><w:r><w:rPr><w:b/></w:rPr><w:t>post</w:t></w:r><w:r><w:t>code</w:t></w:r></w:p>
+  </w:body></w:document>`;
+  const markdown = docxDocumentXmlToMarkdown(documentXml, "format-boundaries.docx");
+  const plain = markdown.replace(/[*_~`]/g, "");
+  assert.match(plain, /alpha beta/);
+  assert.match(plain, /12 34/);
+  assert.match(plain, /postcode/);
+  assert.doesNotMatch(plain, /alpha beta\s*\n\s*1234/);
 });
 test("restores linear LaTeX command words stored in Word OMML runs", () => {
   const documentXml = `<w:document xmlns:w="word" xmlns:m="math"><w:body><w:p><m:oMath>
@@ -467,13 +622,28 @@ test("pdf text layer extraction promotes only credible headings and decodes prin
   assert.match(markdown, /Parentheses \(survive\) extraction\./);
   assert.doesNotMatch(markdown, /\u0007/);
 });
-test("converts generated pdf through document job flow", async () => {
+test("Word nested text boxes keep following pictures and select only one alternate representation", () => {
+  const source = `<w:document><w:body><w:p><w:r><w:t>Before</w:t></w:r><w:r>
+  <mc:AlternateContent><mc:Choice Requires="wpg"><w:drawing><w:txbxContent><w:p><w:r><w:t>Inside box</w:t></w:r></w:p></w:txbxContent><a:blip r:embed="one"/><a:blip r:embed="two"/></w:drawing></mc:Choice>
+  <mc:Fallback><w:pict><v:imagedata r:id="one"/></w:pict></mc:Fallback></mc:AlternateContent>
+  </w:r><w:r><w:t>After box</w:t></w:r></w:p></w:body></w:document>`;
+  const markdown = docxDocumentXmlToMarkdown(source, "nested.docx", "", {}, {
+    mediaTargets: new Map([["one", "assets/one.png"], ["two", "assets/two.png"]])
+  });
+  assert.match(markdown, /Before/);
+  assert.match(markdown, /After box/);
+  assert.equal(markdown.split("Inside box").length - 1, 1);
+  assert.equal(markdown.split("assets/one.png").length - 1, 1);
+  assert.equal(markdown.split("assets/two.png").length - 1, 1);
+});
+
+test("converts generated pdf through the explicit built-in document job flow", async () => {
   const workspace = await tempDir("lft-pdf-");
   await openOrCreateWorkspace(workspace);
   const pdfPath = path.join(workspace, "report.pdf");
   await writeFile(pdfPath, markdownToPdfBuffer("# Report\n\nPlain PDF text."));
   const record = await importFileToWorkspace(workspace, pdfPath);
-  const job = await convertDocumentToMarkdownAsJob(workspace, record.id, pdfMarkdownConverter);
+  const job = await convertDocumentToMarkdownAsJob(workspace, record.id, pdfMarkdownConverter, { preferredExtractor: "built-in" });
   const manifest = await readManifest(workspace);
   const document = manifest.documents.find((candidate) => candidate.id === record.id);
   assert.equal(job.status, "succeeded");
@@ -482,8 +652,41 @@ test("converts generated pdf through document job flow", async () => {
   assert.ok(job.output.warnings.some((warning) => warning.includes("PDF rich objects require review")));
   assert.ok(document.extractionQuality.unsupportedFeatures.includes("images"));
   assert.ok(document.extractionQuality.unsupportedFeatures.includes("formulas"));
+  assert.ok(document.documentIrPath.endsWith("index.json"));
+  const documentIr = await readDocumentIr(workspace, document.id, document.documentIrRevisionId);
+  assert.equal(documentIr.source.type, "pdf");
+  assert.ok(documentIr.blocks.some((block) => block.type === "heading" || block.type === "title"));
   const qualityReport = JSON.parse(await readFile(document.outputMarkdownPath.replace(/\.md$/, ".quality.json"), "utf8"));
   assert.ok(qualityReport.matchedKnownLimits.includes("pdf_rich_objects_unsupported"));
+});
+
+test("PDF text extraction stops at the configured decompressed stream budget", async () => {
+  const source = Buffer.from("<< /Length 10 >>\nstream\n1234567890\nendstream", "latin1");
+  await assert.rejects(
+    () => pdfBufferToMarkdown(source, "budget.pdf", { maxDecompressedBytes: 4 }),
+    /PDF decompressed stream budget exceeded/
+  );
+});
+
+test("PDF resource limits reject non-finite budgets and page counts tolerate dictionary order", () => {
+  assert.throws(() => assertPdfInputSize({ size: 10 }, "unbounded"), (error) => error?.code === "PDF_BUDGET_INVALID");
+  assert.equal(detectPdfPageCount(Buffer.from("<< /Count 12 /Type /Pages /Kids [] >>")), 12);
+  assert.equal(detectPdfPageCount(Buffer.from("<< /Type /Pages /Count 12 /Kids [] >>")), 12);
+});
+
+test("PDF page backend exposes an honest page ledger for explicit page markers", () => {
+  const ledger = createPdfPageLedgerFromMarkdown("<!-- pdf-page: 1 -->\nFirst\n<!-- pdf-page: 2; extraction: ocr_failed -->\nSecond", 2);
+  assert.deepEqual(ledger.pages.map((page) => [page.pageNumber, page.status]), [[1, "completed"], [2, "failed"]]);
+  assert.equal(ledger.pageCountKnown, true);
+});
+test("PDF conversion rejects an oversized source before reading the whole file", async () => {
+  const workspace = await tempDir("pdf-input-budget-");
+  const pdfPath = path.join(workspace, "oversized.pdf");
+  await writeFile(pdfPath, Buffer.alloc(16, 0x20));
+  await assert.rejects(
+    () => pdfMarkdownConverter.convert({ sourcePath: pdfPath, maxInputBytes: 8 }),
+    (error) => error?.code === "PDF_INPUT_LIMIT"
+  );
 });
 test("PDF retry keeps built-in Markdown when an optional extractor is unavailable", async () => {
   const workspace = await tempDir("pdf-optional-fallback-");
@@ -685,7 +888,7 @@ test("low-readable pdf extraction recommends OCR before AI send", async () => {
   const pdfPath = path.join(workspace, "garbled.pdf");
   await writeFile(pdfPath, Buffer.from("%PDF-1.4\nstream\n(\\376\\377\\000A\\000B\\000C\\000D) Tj\nendstream\n%%EOF\n", "latin1"));
   const record = await importFileToWorkspace(workspace, pdfPath);
-  const job = await convertDocumentToMarkdownAsJob(workspace, record.id, pdfMarkdownConverter);
+  const job = await convertDocumentToMarkdownAsJob(workspace, record.id, pdfMarkdownConverter, { preferredExtractor: "built-in" });
   const manifest = await readManifest(workspace);
   const document = manifest.documents.find((candidate) => candidate.id === record.id);
   const qualityReport = JSON.parse(await readFile(document.outputMarkdownPath.replace(/\.md$/, ".quality.json"), "utf8"));
@@ -1270,7 +1473,8 @@ test("PDF visual placeholders become inline Markdown assets", () => {
     "        <!-- pdf-formula: page=12 index=2 file=page-000012-formula-001.png -->",
     "<!-- pdf-table: page=12 index=4 file=page-000012-table-003.png -->",
     "t=2.0<!-- pdf-formula: page=12 index=3 file=page-000012-formula-002.png -->tail",
-    "A<!-- pdf-formula: page=12 index=5 file=page-000012-formula-003.png mode=inline -->B"
+    "A<!-- pdf-formula: page=12 index=5 file=page-000012-formula-003.png mode=inline -->B",
+    "+                  <!-- pdf-formula: page=1780 index=0 file=page-001780-formula-000-8d699c07.png mode=inline -->+"
   ].join("\n");
   const main = attachPdfImagesToMarkdown(source, "Physics Notes", false);
   const readable = attachPdfImagesToMarkdown(source, "Physics Notes", true);
@@ -1281,6 +1485,7 @@ test("PDF visual placeholders become inline Markdown assets", () => {
   assert.doesNotMatch(main, /t=2\.0!\[Formula preserved/);
   assert.match(main, /t=2\.0\n\n!\[Formula preserved from PDF page 12\]\(<assets\/Physics Notes\.pdf\/page-000012-formula-002\.png>\)\n\ntail/);
   assert.match(main, /A!\[Inline formula preserved from PDF page 12\]\(<assets\/Physics Notes\.pdf\/page-000012-formula-003\.png>\)B/);
+  assert.match(main, /^\+!\[Inline formula preserved from PDF page 1780\]\(<assets\/Physics Notes\.pdf\/page-001780-formula-000-8d699c07\.png>\)\+$/m);
   assert.match(main, /<assets\/Physics Notes\.pdf\/page-000012-figure-000\.png>/);
   assert.match(readable, /<\.\.\/assets\/Physics Notes\.pdf\/page-000012-formula-001\.png>/);
 });
@@ -1351,6 +1556,25 @@ test("PDF scientific retry accepts refined layout Markdown and reports formula O
   assert.ok(result.warnings.some((warning) => warning.includes("1 of 1")));
 });
 
+test("layout extraction feeds physical page records into the PDF result", async () => {
+  const workspace = await tempDir("pdf-layout-page-ledger-");
+  const pdfPath = path.join(workspace, "paged.pdf");
+  await writeFile(pdfPath, markdownToPdfBuffer("# Paged\n\nSource."));
+  const result = await runPdfExtractionPipeline(pdfPath, {
+    preferredExtractor: "pdfplumber",
+    converter: { convert: async () => ({ markdown: "# Paged\n\nSource.", warnings: [] }) },
+    mockPdfLayoutAvailable: true,
+    mockPdfLayout: "# Paged\n\n<!-- pdf-page: 1 -->\n\nSource.",
+    mockPdfVisualMap: { pageCount: 1, pagesAnalyzed: 1, pages: [{ page: 1, regions: [] }], summary: {} },
+    mockPdftotextAvailable: false,
+    mockMutoolAvailable: false,
+    mockPandocAvailable: false
+  });
+  assert.equal(result.extractorName, "pdfplumber");
+  assert.equal(result.pageLedger.sourcePageCount, 1);
+  assert.deepEqual(result.pageLedger.pages.map((page) => page.pageNumber), [1]);
+});
+
 test("PDF scientific retry keeps the canonical layout path for editable formulas", async () => {
   const workspace = await tempDir("pdf-scientific-canonical-layout-");
   const pdfPath = path.join(workspace, "textbook.pdf");
@@ -1393,6 +1617,27 @@ test("PDF pipeline runs local OCR when a PDF has no readable text layer", async 
   assert.equal(result.stats.ocr.pagesProcessed, 1);
   assert.equal(result.attempts.find((attempt) => attempt.name === "tesseract-ocr").status, "success");
   assert.match(result.warnings.join("\n"), /visual review/);
+});
+
+test("PDF pipeline reports failed OCR pages after page progress", async () => {
+  const workspace = await tempDir("pdf-ocr-failed-page-");
+  const pdfPath = path.join(workspace, "scan.pdf");
+  await writeFile(pdfPath, markdownToPdfBuffer("# Scan placeholder"));
+  const progress = [];
+  const result = await runPdfExtractionPipeline(pdfPath, {
+    converter: { convert: async () => ({ markdown: "# Scan\n\nno simple text layer", warnings: [] }) },
+    mockPdfLayoutAvailable: false,
+    mockPdftotextAvailable: false,
+    mockMutoolAvailable: false,
+    mockPandocAvailable: false,
+    mockOcrAvailable: true,
+    mockOcrMarkdown: "# Scan\n\n<!-- pdf-page: 1; extraction: ocr_failed -->\n\n> OCR failed for source page 1.",
+    mockOcrPageCount: 2,
+    mockOcrFailedPages: [2],
+    onProgress: (message) => progress.push(String(message))
+  });
+  assert.equal(result.extractorName, "tesseract-ocr");
+  assert.ok(progress.includes("OCR failed page 2 of 2"));
 });
 
 test("PDF pipeline accepts high-fidelity Marker Markdown with editable equations and assets", async () => {
@@ -1616,4 +1861,45 @@ test("formula semantic loss blocks AI intake even when body text is readable", a
   assert.ok(report.activeWarnings.includes("formulaDamageLikely"));
   assert.ok(report.matchedKnownLimits.includes("pdf_formula_semantic_loss"));
   assert.match(report.recommendedNextAction, /Marker full-page reconstruction/);
+});
+
+test("partial PDF page windows remain review-required", async () => {
+  const workspace = await tempDir("partial-page-quality-");
+  await openOrCreateWorkspace(workspace);
+  const { createQualityReport } = await import("../src/core/qualityReport.js");
+  const report = await createQualityReport(
+    workspace,
+    "doc_partial",
+    "partial.pdf",
+    "pdf",
+    path.join(workspace, "partial.md"),
+    "First page only",
+    { confidence: "medium", partial: true },
+    ["Only PDF page 1 of 4 was processed."]
+  );
+  assert.equal(report.qualityState, "review_required");
+  assert.ok(report.activeWarnings.includes("partialExtraction"));
+  assert.ok(report.matchedKnownLimits.includes("pdf_page_window_partial"));
+  assert.match(report.recommendedNextAction, /Resume the remaining PDF page window/);
+});
+
+test("complete PDF windows with OCR review do not suggest resuming pages", async () => {
+  const workspace = await tempDir("complete-page-review-quality-");
+  await openOrCreateWorkspace(workspace);
+  const { createQualityReport } = await import("../src/core/qualityReport.js");
+  const report = await createQualityReport(
+    workspace,
+    "doc_complete_review",
+    "complete.pdf",
+    "pdf",
+    path.join(workspace, "complete.md"),
+    "All pages were processed, but one OCR region needs review.",
+    { confidence: "medium", partial: true, pageCount: 4, pagesAnalyzed: 4, reviewPages: 1, ocrReviewRegions: 1 },
+    []
+  );
+  assert.equal(report.qualityState, "review_required");
+  assert.ok(report.activeWarnings.includes("ocrRegionReview"));
+  assert.equal(report.activeWarnings.includes("partialExtraction"), false);
+  assert.equal(report.matchedKnownLimits.includes("pdf_page_window_partial"), false);
+  assert.doesNotMatch(report.recommendedNextAction, /Resume the remaining PDF page window/);
 });

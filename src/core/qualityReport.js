@@ -53,6 +53,24 @@ const textLayerDetected = resultQuality?.textLayerDetected ?? resultQuality?.has
 const scannedLikely = resultQuality?.scannedLikely ?? resultQuality?.hasOcrMissing ?? false;
 const tableSimplified = resultQuality?.tableSimplified ?? resultQuality?.hasTablesSimplified ?? false;
 const layoutSimplified = resultQuality?.layoutSimplified ?? false;
+const expectedPdfPages = Number(resultQuality?.pageCount ?? resultQuality?.sourcePageCount ?? resultQuality?.visualMap?.pageCount ?? 0);
+const analyzedPdfPages = Number(resultQuality?.pagesAnalyzed ?? resultQuality?.visualMap?.pagesAnalyzed ?? 0);
+const pageWindowComplete = inputType === "pdf"
+  && Number.isFinite(expectedPdfPages) && expectedPdfPages > 0
+  && Number.isFinite(analyzedPdfPages) && analyzedPdfPages >= expectedPdfPages;
+const partialExtraction = resultQuality?.partial === true && !pageWindowComplete;
+const visualFallbackRegions = Number(resultQuality?.visualFallbackRegions || 0);
+const failedVisualRegions = Number(resultQuality?.failedVisualRegions || 0);
+const pendingOcrPages = Number(resultQuality?.pendingOcrPages || 0);
+const ocrPages = Number(resultQuality?.ocrPages || 0);
+const pageStatusCounts = resultQuality?.pageStatusCounts && typeof resultQuality.pageStatusCounts === "object"
+ ? resultQuality.pageStatusCounts : {};
+const unresolvedPages = Number(resultQuality?.unresolvedPages || pageStatusCounts.unresolved || 0);
+const reviewPages = Number(resultQuality?.reviewPages || pageStatusCounts.ocr_review_required || 0);
+const ocrReviewRegions = Number(resultQuality?.ocrReviewRegions || 0);
+const continuationDecisions = resultQuality?.continuationDecisions || [];
+const continuationCandidates = continuationDecisions.filter(item => item.status === "candidate").length;
+const readingOrderConflicts = resultQuality?.readingOrderConflicts || [];
 const possibleMojibake = resultQuality?.possibleMojibake ?? markdown.includes("\ufffd");
 const semanticLoss = resultQuality?.semanticLoss || {};
 const formulaDamageLikely = resultQuality?.formulaDamageLikely ?? Boolean(semanticLoss.formulaDamageLikely);
@@ -64,7 +82,7 @@ const imageOnlyLikely = !textLayerDetected || charCount === 0 || markdown.trim()
 const requiredAdapters = await requiredAdaptersForQuality(inputType, { scannedLikely, imageOnlyLikely, formulaDamageLikely });
 const missingAdapters = requiredAdapters.filter((adapter) => !adapter.available);
 let confidence = "high";
-if (possibleMojibake || tableSimplified) {
+if (possibleMojibake || tableSimplified || partialExtraction) {
 confidence = "medium";
 }
 if (scannedLikely || imageOnlyLikely || charCount < 100) {
@@ -84,17 +102,28 @@ recommendedNextAction = "Verify text encoding or check missing CJK CID fonts.";
 recommendedNextAction = "Inspect merged table cells manually in the output.";
 }
 const activeWarnings = [];
+if (continuationCandidates) activeWarnings.push("continuationReview");
+if (readingOrderConflicts.length) activeWarnings.push("readingOrderReview");
 if (scannedLikely || imageOnlyLikely) activeWarnings.push("scannedLikely");
 for (const adapter of missingAdapters) {
 if (adapter.missingWarning) activeWarnings.push(adapter.missingWarning);
 }
 if (tableSimplified) activeWarnings.push("tableSimplified");
+if (partialExtraction) activeWarnings.push("partialExtraction");
+if (visualFallbackRegions) activeWarnings.push("visualFallbackReview");
+if (failedVisualRegions) activeWarnings.push("visualRenderFailed");
+if (pendingOcrPages) activeWarnings.push("pagesNeedOcr");
+if (ocrPages) activeWarnings.push("ocrReview");
+if (unresolvedPages) activeWarnings.push("unresolvedPages");
+if (reviewPages || ocrReviewRegions) activeWarnings.push("ocrRegionReview");
 if (possibleMojibake) activeWarnings.push("possibleMojibake");
 if (formulaDamageLikely) activeWarnings.push("formulaDamageLikely");
 const matchedKnownLimits = [];
 if (scannedLikely || imageOnlyLikely) matchedKnownLimits.push("ocr_unsupported");
 if (missingAdapters.some((adapter) => adapter.key === "tesseract")) matchedKnownLimits.push("ocr_adapter_missing");
 if (inputType === "pdf" && (tableSimplified || layoutSimplified)) matchedKnownLimits.push("complex_pdf_layout");
+if (inputType === "pdf" && partialExtraction) matchedKnownLimits.push("pdf_page_window_partial");
+if (inputType === "pdf" && unresolvedPages) matchedKnownLimits.push("pdf_page_content_unresolved");
 if (inputType === "pdf" && formulaDamageLikely) matchedKnownLimits.push("pdf_formula_semantic_loss");
 if (inputType === "pdf" && unsupportedFeatures.some((feature) => ["images", "formulas", "embedded_objects"].includes(feature))) {
 matchedKnownLimits.push("pdf_rich_objects_unsupported");
@@ -106,6 +135,13 @@ if (inputType === "docx" && unsupportedFeatures.some((feature) => ["macros", "vb
 matchedKnownLimits.push("docx_macros_vba_unsupported");
 }
 const suggestedActions = [];
+if (continuationCandidates) suggestedActions.push("Review uncertain page-break continuations against the source; their text remains separate.");
+if (readingOrderConflicts.length) suggestedActions.push("Review pages with conflicting reading-order evidence; their source order was preserved.");
+if (pendingOcrPages) suggestedActions.push("Some source pages still require OCR; review the retained PDF before using the full document.");
+if (ocrPages) suggestedActions.push("Review OCR text, numbers, formulas, and reading order against the source pages.");
+if (visualFallbackRegions || failedVisualRegions) {
+ suggestedActions.push("Review source-linked regions against the original document; preserved images are not verified editable text.");
+}
 if (missingAdapters.some((adapter) => adapter.key === "tesseract")) {
 suggestedActions.push("Install Tesseract OCR or provide a text-layer PDF before AI Send Gate.");
 }
@@ -121,22 +157,34 @@ suggestedActions.push(marker?.available
 if (tableSimplified) {
 suggestedActions.push("Review simplified tables manually, or export them to CSV for cleanup.");
 }
+if (partialExtraction) {
+ suggestedActions.push("Resume the remaining PDF page window before treating the document as complete.");
+}
+if (unresolvedPages) {
+ suggestedActions.push(`${unresolvedPages} PDF pages contain unresolved regions or failed visual preservation; review or retry those pages before using the document.`);
+}
+if (reviewPages || ocrReviewRegions) {
+ suggestedActions.push(`${ocrReviewRegions || "Some"} OCR region(s) retain visual content without verified editable text; review those source-linked regions before relying on the text.`);
+}
 if (possibleMojibake) {
 suggestedActions.push("Check the file encoding, source language settings, or missing CJK font mappings.");
 }
 if (suggestedActions.length === 0) {
-suggestedActions.push("Document quality looks ready. You can create an exchange package or run a local SQL query next.");
+ suggestedActions.push("Document quality looks ready. You can create an exchange package or run a local SQL query next.");
 }
-const whetherAiSendGateBlocked = confidence === "low" || formulaDamageLikely;
+recommendedNextAction = suggestedActions[0] || recommendedNextAction;
+const whetherAiSendGateBlocked = confidence === "low" || formulaDamageLikely || visualFallbackRegions > 0 || failedVisualRegions > 0 || pendingOcrPages > 0 || unresolvedPages > 0 || reviewPages > 0 || ocrReviewRegions > 0;
 const whetherUserCanOverride = true;
 const recommendedNextStep = suggestedActions[0] || "None. Document extraction is ready for AI exchange.";
 
 let qualityState = "clean_readable";
-if (scannedLikely || imageOnlyLikely) {
+if (scannedLikely || imageOnlyLikely || pendingOcrPages) {
  qualityState = "ocr_required";
+} else if (unresolvedPages || reviewPages || ocrReviewRegions) {
+ qualityState = "review_required";
 } else if (formulaDamageLikely) {
  qualityState = "formula_reconstruction_required";
-} else if (confidence === "medium" || possibleMojibake || tableSimplified) {
+} else if (confidence === "medium" || possibleMojibake || tableSimplified || partialExtraction || visualFallbackRegions || failedVisualRegions || ocrPages || continuationCandidates || readingOrderConflicts.length) {
  qualityState = "review_required";
 } else if (confidence === "low") {
  qualityState = "blocked_untrusted";
@@ -155,6 +203,19 @@ pageCountEstimate: estimatedPages,
 tableCountEstimate: estimatedTables,
 tableSimplified,
 layoutSimplified,
+partialExtraction,
+visualFallbackRegions,
+failedVisualRegions,
+pendingOcrPages,
+reviewPages,
+ocrReviewRegions,
+ocrPages,
+pageStatusCounts,
+unresolvedPages,
+continuationCandidates,
+continuationDecisions,
+readingOrderConflicts,
+sourceMarkdownHash: computeBufferHash(Buffer.from(markdown, "utf8")),
 imageOnlyLikely,
 possibleMojibake,
 formulaDamageLikely,

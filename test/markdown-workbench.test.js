@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import vm from "node:vm";
-import { createMarkdownWorkbenchPanel } from "../public/markdownWorkbenchPanel.js";
+import {
+  createExportStatusController,
+  createMarkdownWorkbenchPanel,
+  requestExportSavePath
+} from "../public/markdownWorkbenchPanel.js";
 const projectRoot = path.resolve(import.meta.dirname, "..");
 function escapeHtml(value) {
   return String(value ?? "")
@@ -25,6 +29,110 @@ function createRenderer(options = {}) {
     localApiBaseUrl: () => "http://127.0.0.1:4177"
   })._test;
 }
+
+function createStatusElement({ hidden = false } = {}) {
+  const classes = new Set(hidden ? ["hidden"] : []);
+  return {
+    textContent: "",
+    onclick: null,
+    style: { color: "", display: "none" },
+    classList: {
+      add: (name) => classes.add(name),
+      remove: (name) => classes.delete(name),
+      contains: (name) => classes.has(name)
+    }
+  };
+}
+
+test("read view renders source table spans and preserves newly edited covered cells", () => {
+  const markdown = '<!-- schema-table: {"v":1,"rows":2,"cols":3,"spans":[[0,0,2,2]]} -->\n| Merged |  | Top |\n| --- | --- | --- |\n|  |  | Bottom |';
+  const html = createRenderer().markdownToReadableHtml(markdown);
+  assert.match(html, /rowspan="2" colspan="2"/);
+  assert.doesNotMatch(html, /schema-table/);
+  const edited = createRenderer().markdownToReadableHtml(markdown.replace('| Merged |  |', '| Merged | User text |'));
+  assert.match(edited, /User text/);
+  assert.doesNotMatch(edited, /rowspan|colspan/);
+});
+
+test("export status containers have unique record and Markdown identities", async () => {
+  const html = await readFile(path.join(projectRoot, "public", "index.html"), "utf8");
+  const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]);
+  const duplicates = [...new Set(ids.filter((id, index) => ids.indexOf(id) !== index))];
+  assert.deepEqual(duplicates, []);
+  assert.ok(ids.includes("recordExportStatusContainer"));
+  assert.ok(ids.includes("markdownExportStatusContainer"));
+});
+
+test("merged export save status handles cancel and both synchronous and asynchronous picker failures", async () => {
+  const recordContainer = createStatusElement({ hidden: true });
+  const markdownContainer = createStatusElement({ hidden: true });
+  const statusText = createStatusElement();
+  const pathText = createStatusElement();
+  const folderButton = createStatusElement();
+  const status = createExportStatusController({
+    container: markdownContainer,
+    statusText,
+    pathText,
+    folderButton
+  });
+
+  const cancelled = await requestExportSavePath({ status, selectPath: async () => null });
+  assert.equal(cancelled, "");
+  assert.equal(statusText.textContent, "cancelled");
+  assert.equal(pathText.textContent, "No file was exported.");
+  assert.equal(folderButton.style.display, "none");
+  assert.equal(folderButton.onclick, null);
+  assert.equal(markdownContainer.classList.contains("hidden"), false);
+  assert.equal(recordContainer.classList.contains("hidden"), true);
+
+  for (const [message, selectPath] of [
+    ["picker failed before promise", () => { throw new Error("picker failed before promise"); }],
+    ["picker failed after await", async () => { throw new Error("picker failed after await"); }]
+  ]) {
+    await assert.rejects(requestExportSavePath({ status, selectPath }), new RegExp(message));
+    assert.equal(statusText.textContent, "failed");
+    assert.equal(pathText.textContent, message);
+    assert.equal(folderButton.style.display, "none");
+    assert.equal(folderButton.onclick, null);
+  }
+
+  let resolveSelection;
+  const pendingSelection = requestExportSavePath({
+    status,
+    selectPath: () => new Promise((resolve) => { resolveSelection = resolve; })
+  });
+  assert.equal(statusText.textContent, "Waiting for save location...");
+  assert.equal(pathText.textContent, "Choose a destination in the system save dialog.");
+  assert.equal(markdownContainer.classList.contains("hidden"), false);
+  resolveSelection("C:/exports/report.html");
+  const selected = await pendingSelection;
+  assert.equal(selected, "C:/exports/report.html");
+  status.running("Merging segments...");
+  assert.equal(statusText.textContent, "Merging segments...");
+  assert.equal(pathText.textContent, "");
+});
+
+test("merged export completed and failed states replace stale folder actions", async () => {
+  const container = createStatusElement({ hidden: true });
+  const statusText = createStatusElement();
+  const pathText = createStatusElement();
+  const folderButton = createStatusElement();
+  const status = createExportStatusController({ container, statusText, pathText, folderButton });
+  let opened = 0;
+
+  status.completed("C:/exports/report.html", () => { opened += 1; });
+  assert.equal(statusText.textContent, "completed");
+  assert.equal(pathText.textContent, "C:/exports/report.html");
+  assert.equal(folderButton.style.display, "inline-block");
+  await folderButton.onclick();
+  assert.equal(opened, 1);
+
+  status.failed(new Error("finalize denied"));
+  assert.equal(statusText.textContent, "failed");
+  assert.equal(pathText.textContent, "finalize denied");
+  assert.equal(folderButton.style.display, "none");
+  assert.equal(folderButton.onclick, null);
+});
 
 test("merged export removes the complete generated segment header, including its period", async () => {
   const appSource = await readFile(path.join(projectRoot, "public", "app.js"), "utf8");
@@ -214,6 +322,9 @@ test("merged exports share a sequential queue and request non-overwriting output
   assert.match(source, /avoidOverwrite: true/);
   assert.match(source, /function protectedExportStagePath\(format, requestedPath = ""\)/);
   assert.match(source, /tauriInvoke\("finalize_authorized_export"/);
+  assert.match(source, /format === "html"[\s\S]*exportSegmentedHtmlToDestination\(\{/);
+  assert.match(source, /api\("\/api\/markdown\/export-segments-html", requestBody\)/);
+  assert.match(source, /Streaming HTML into protected staging/);
   assert.match(source, /result = await exportMarkdownToDestination\(\{\s*relativePath: tempMdPath,\s*outputRelativePath: finalExportPath,/);
 });
 test("newly imported records remain selected so segmented navigation and merged export render", async () => {
@@ -227,6 +338,7 @@ test("newly imported records remain selected so segmented navigation and merged 
 });
 test("selecting a document history record refreshes the active record and segment banner", async () => {
   const source = await readFile(path.join(projectRoot, "public", "manifestPanel.js"), "utf8");
+  const app = await readFile(path.join(projectRoot, "public", "app.js"), "utf8");
   const workflow = source.slice(
     source.indexOf("async function selectRecordForWorkflow"),
     source.indexOf("async function prepareAiForRecord")
@@ -234,6 +346,11 @@ test("selecting a document history record refreshes the active record and segmen
   assert.match(workflow, /state\.currentRecord = record;\s*state\.selectedRecord = record;/);
   assert.match(workflow, /window\.renderMarkdownReadView\?\.\(\);/);
   assert.match(workflow, /window\.setMarkdownViewMode\?\.\("edit"\);/);
+  assert.match(source, /const opensReadyDocument = kind === "document" && record\.status === "ready" && record\.outputMarkdownPath;/);
+  assert.match(source, /if \(opensReadyDocument && await beforeDocumentSelected\?\.\(\{ record \}\) === false\) \{\s*return \{ cancelled: true \};\s*\}/);
+  assert.match(source, /if \(opensReadyDocument\) \{\s*await onDocumentSelected\?\.\(\{ record, result \}\);/);
+  assert.match(app, /beforeDocumentSelected: \(\) => confirmDiscardMarkdownChanges\("open another document"\),/);
+  assert.match(app, /onDocumentSelected: \(\) => \{\s*const selectedPath = \$\("notePath"\)\.value\.trim\(\);\s*refreshMarkdownExportPaths\(selectedPath\);\s*markMarkdownClean\(\$\("noteContent"\)\.value\);\s*setActiveView\("editor"\);/);
 });
 test("PDF retries surface failed jobs and restore only the unchanged active editor", async () => {
   const manifestPanel = await readFile(path.join(projectRoot, "public", "manifestPanel.js"), "utf8");
@@ -365,4 +482,17 @@ test("external Markdown open and save use the Tauri v2 internal bridge without H
   assert.match(source, /const content = await readExternalMarkdownFile\(selected\);/);
   assert.match(source, /isExternalMarkdownPath\(relativePath\)[\s\S]*?await readExternalMarkdownFile\(relativePath\)/);
   assert.doesNotMatch(accessSource, /\/api\/markdown\/(?:read|save)-external/);
+});
+
+test("standalone save-location buttons report dialog cancellation to the shared runner", async () => {
+  const appSource = await readFile(path.join(projectRoot, "public", "app.js"), "utf8");
+  const panelSource = await readFile(path.join(projectRoot, "public", "markdownWorkbenchPanel.js"), "utf8");
+  const appHandler = appSource.slice(appSource.indexOf('$("btnChooseMdExportPath")'), appSource.indexOf("const toggleBtn"));
+  assert.match(appHandler, /return selected \|\| \{ cancelled: true \};/);
+  for (const id of ["btnChooseDocExportPath", "btnChoosePdfExportPath", "btnChooseHtmlExportPath"]) {
+    const start = panelSource.indexOf(`$("${id}")`);
+    const handler = panelSource.slice(start, start + 320);
+    assert.ok(start >= 0, `${id} handler must exist`);
+    assert.match(handler, /return selected \|\| \{ cancelled: true \};/);
+  }
 });

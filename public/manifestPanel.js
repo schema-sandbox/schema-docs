@@ -17,7 +17,10 @@ refreshManifest,
 refreshTimeline,
 refreshVersions,
 rememberConversionAudit,
-showEditorWarningsForRecord
+showEditorWarningsForRecord,
+datasetPreviewPanel,
+beforeDocumentSelected,
+onDocumentSelected
 }) {
 function showDiagnosticsModal(data) {
 const overlay = document.createElement("div");
@@ -335,27 +338,43 @@ showAlert("success", "Exchange package created and trust report loaded.");
 return result;
 }
 async function selectRecordForWorkflow(record, kind) {
+let preparedDocument = null;
+if (kind === "document" && record.status === "ready" && record.outputMarkdownPath) {
+const relativePath = relativeHumanMarkdownPath(record);
+const readableSegments = record.markdownOutputs?.readableSegments;
+const firstPart = readableSegments?.segmented
+? readableSegments.segments?.[0]?.relativePath || ""
+: "";
+const notePath = firstPart || relativePath;
+const usePlaceholder = !firstPart && shouldUseChunkedEditorLoad(record);
+const noteContent = usePlaceholder
+? null
+: await api("/api/markdown/read", { relativePath: notePath });
+preparedDocument = {
+notePath,
+noteContent,
+relativePath,
+usePlaceholder,
+loadedFirstPart: Boolean(firstPart)
+};
+}
 state.currentRecord = record;
 state.selectedRecord = record;
 $("recordId").value = record.id;
-if (kind === "document" && record.status === "ready" && record.outputMarkdownPath) {
-const relPath = relativeHumanMarkdownPath(record);
-$("notePath").value = relPath;
-if (record.markdownOutputs?.readableSegments?.segmented) {
-const firstPart = record.markdownOutputs.readableSegments.segments?.[0]?.relativePath || "";
-if (firstPart) {
-$("notePath").value = firstPart;
-const noteContent = await api("/api/markdown/read", { relativePath: firstPart });
-$("noteContent").value = noteContent;
-showAlert("info", "Segmented large PDF: Loaded Part 1. Use outline or workbench to swap parts.");
-} else if (shouldUseChunkedEditorLoad(record)) {
-showChunkedEditorPlaceholder(record, relPath);
-}
-} else if (shouldUseChunkedEditorLoad(record)) {
-showChunkedEditorPlaceholder(record, relPath);
+if (kind === "dataset") {
+await datasetPreviewPanel.revealDataset(record);
 } else {
-const noteContent = await api("/api/markdown/read", { relativePath: relPath });
-$("noteContent").value = noteContent;
+datasetPreviewPanel.clear();
+}
+if (preparedDocument) {
+$("notePath").value = preparedDocument.notePath;
+if (preparedDocument.usePlaceholder) {
+showChunkedEditorPlaceholder(record, preparedDocument.relativePath);
+} else {
+$("noteContent").value = preparedDocument.noteContent;
+}
+if (preparedDocument.loadedFirstPart) {
+showAlert("info", "Segmented large PDF: Loaded Part 1. Use outline or workbench to swap parts.");
 }
 showEditorWarningsForRecord(record);
 } else {
@@ -537,7 +556,17 @@ titleArea.append(typeBadge, title);
 const selectBtn = pill("Select", { recordId: record.id });
 selectBtn.style.padding = "4px 10px";
 selectBtn.style.fontSize = "12px";
-selectBtn.addEventListener("click", () => run(() => selectRecordForWorkflow(record, kind)));
+selectBtn.addEventListener("click", () => run(async () => {
+const opensReadyDocument = kind === "document" && record.status === "ready" && record.outputMarkdownPath;
+if (opensReadyDocument && await beforeDocumentSelected?.({ record }) === false) {
+return { cancelled: true };
+}
+const result = await selectRecordForWorkflow(record, kind);
+if (opensReadyDocument) {
+await onDocumentSelected?.({ record, result });
+}
+return result;
+}));
 header.append(titleArea, selectBtn);
 card.append(header);
 const metaRow = document.createElement("div");

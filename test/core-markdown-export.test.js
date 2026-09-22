@@ -57,7 +57,7 @@ test("Markdown Export Quality Upgrade", async (t) => {
 
   await t.test("PDF test-context fallback remains a valid PDF buffer", async () => {
     const md = "Hello world";
-    const buffer = await exportMarkdownToPdf(md);
+    const buffer = await exportMarkdownToPdf(md, { renderer: "native-test" });
     assert.ok(buffer instanceof Buffer, "PDF exporter should return a PDF buffer in tests");
   });
 });

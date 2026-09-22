@@ -3,9 +3,10 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { listZipEntries, readZipEntry } from "../core/zip.js";
-import { getAttribute, getXmlBlocks, getXmlTextValues, hasTag, stripXmlTags } from "../core/xml.js";
+import { getAttribute, getXmlTextValues, hasTag, stripXmlTags } from "../core/xml.js";
+import { getBalancedXmlBlocks as getXmlBlocks, selectDocxAlternatives, preserveDocxDrawings } from "./docxXmlStructure.js";
 import { AppError } from "../core/errors.js";
-import { markdownTable } from "../core/markdownFormatting.js";
+import { markdownTable, escapeMarkdownTableCell } from "../core/markdownFormatting.js";
 const execFileAsync = promisify(execFile);
 async function convertWindowsMetafile(sourcePath, outputPath) {
   if (process.platform !== "win32" || !/\.(?:wmf|emf)$/i.test(sourcePath)) return false;
@@ -50,17 +51,16 @@ function unwrapWholeParagraphStrong(markdown) {
   if (!inner.trim() || inner.includes("**") || inner.includes("\n")) return markdown;
   return `${match[1]}${inner}${match[3]}`;
 }
-function imageRelationshipId(runXml) {
-  const blip = /<a:blip\b[^>]*>/i.exec(runXml)?.[0] || "";
-  const imageData = /<v:imagedata\b[^>]*>/i.exec(runXml)?.[0] || "";
-  return getAttribute(blip, "r:embed") || getAttribute(blip, "r:link") || getAttribute(imageData, "r:id") || "";
+function imageRelationshipIds(runXml) {
+  return [...runXml.matchAll(/<(?:a:blip|v:imagedata)\b[^>]*>/gi)].map(([tag]) =>
+    getAttribute(tag, "r:embed") || getAttribute(tag, "r:link") || getAttribute(tag, "r:id") || getAttribute(tag, "o:relid") || "");
 }
 function embeddedObjectPlaceholder(runXml, mediaTargets = new Map()) {
   if (hasTag(runXml, "w:drawing") || hasTag(runXml, "w:pict") || hasTag(runXml, "w:object") || hasTag(runXml, "o:OLEObject")) {
-    const relId = imageRelationshipId(runXml);
-    if (relId && mediaTargets.has(relId)) return `![Word image](<${mediaTargets.get(relId)}>)`;
+    const images = imageRelationshipIds(runXml).filter(id => mediaTargets.has(id));
+    if (images.length) return images.map(id => `![Word image](<${mediaTargets.get(id)}>)`).join(" ");
     if (hasTag(runXml, "w:object") || hasTag(runXml, "o:OLEObject")) return "[Embedded object omitted]";
-    return "![Embedded image omitted](image)";
+    return "[Drawing not converted; inspect the original Word document]";
   }
   return "";
 }
@@ -201,12 +201,19 @@ function runToMarkdown(runXml, notes = new Map(), mediaTargets = new Map()) {
   }
   return `${markdown}${noteRefs}`;
 }
+function normalizeGeneratedStrong(markdown) {
+  // Word emits one strong wrapper per run. Only remove wrappers that contain
+  // no text. In particular, do not consume the whitespace between two runs:
+  // `**alpha** **beta**` must keep the source space, and `**post**code` must
+  // remain `postcode` rather than acquiring a new space. The former cleanup
+  // used a cross-wrapper regex and silently changed document content.
+  return String(markdown || "")
+    .replace(/\*\*([ \t]*)\*\*/g, "$1")
+    .replace(/\*\*\n\*\*/g, "\n");
+}
 function inlineContentToMarkdown(xml, relationshipTargets, notes = new Map(), mediaTargets = new Map()) {
   const parts = [];
-  const inlinePattern = /<m:oMath(?:\s[^>]*)?>[\s\S]*?<\/m:oMath>|<w:hyperlink(?:\s[^>]*)?>[\s\S]*?<\/w:hyperlink>|<w:r(?:\s[^>]*)?>[\s\S]*?<\/w:r>/g;
-  let match;
-  while ((match = inlinePattern.exec(xml)) !== null) {
-    const block = match[0];
+  for (const block of getXmlBlocks(xml, ["m:oMath", "w:hyperlink", "w:r"])) {
     if (block.startsWith("<m:oMath")) {
       const latex = ommlToLatex(block);
       if (latex) parts.push(`$${latex}$`);
@@ -225,7 +232,7 @@ function inlineContentToMarkdown(xml, relationshipTargets, notes = new Map(), me
     }
     parts.push(runToMarkdown(block, notes, mediaTargets));
   }
-  return parts.join("").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n");
+  return normalizeGeneratedStrong(parts.join("")).replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n");
 }
 function readNumbering(numberingXml = "") {
   const abstracts = new Map();
@@ -323,39 +330,74 @@ function renderNotes(notes) {
   return lines;
 }
 function tableToMarkdown(tableXml, relationshipTargets = new Map(), notes = new Map(), mediaTargets = new Map()) {
-  const rows = getXmlBlocks(tableXml, "w:tr").map((rowXml) => {
-    const cells = [];
+  const rows = [], anchors = [];
+  let active = new Map();
+  for (const rowXml of getXmlBlocks(tableXml, "w:tr")) {
+    const before = Number(getAttribute(/<w:gridBefore\b[^>]*>/.exec(rowXml)?.[0] || "", "w:val") || 0);
+    if (!Number.isInteger(before) || before < 0 || before > 1000) throw new AppError("document_budget_exceeded", "Word table grid exceeds the supported size.");
+    const cells = Array(before).fill(""), next = new Map(), row = rows.length;
     for (const cellXml of getXmlBlocks(rowXml, "w:tc")) {
       const paragraphs = getXmlBlocks(cellXml, "w:p")
         .map((paragraph) => paragraphToMarkdown(paragraph, relationshipTargets, notes, mediaTargets))
         .filter(Boolean);
       const cell = paragraphs.length > 0 ? paragraphs.join("<br>") : stripXmlTags(cellXml).trim();
-      cells.push(cell);
-      const gridSpanTag = /<w:gridSpan\b[^>]*>/i.exec(cellXml)?.[0] ?? "";
-      const span = Math.max(Number(getAttribute(gridSpanTag, "w:val") ?? "1") || 1, 1);
-      for (let index = 1; index < Math.min(span, 12); index += 1) {
-        cells.push("");
+      const properties = getXmlBlocks(cellXml, "w:tcPr")[0] || "";
+      const span = Number(getAttribute(/<w:gridSpan\b[^>]*>/.exec(properties)?.[0] || "", "w:val") || 1);
+      if (!Number.isInteger(span) || span < 1 || span + cells.length > 1000) throw new AppError("document_budget_exceeded", "Word table grid exceeds the supported size.");
+      const mergeTag = /<w:vMerge\b[^>]*>/.exec(properties)?.[0];
+      const column = cells.length, previous = active.get(column);
+      if (mergeTag && getAttribute(mergeTag, "w:val") !== "restart" && !cell.trim() && previous?.[3] === span) {
+        previous[2]++;
+        next.set(column, previous);
+        cells.push(...Array(span).fill(""));
+      } else {
+        const anchor = [row, column, 1, span];
+        anchors.push(anchor);
+        if (mergeTag) next.set(column, anchor);
+        cells.push(cell, ...Array(span-1).fill(""));
       }
     }
-    return cells;
-  }).filter((row) => row.length > 0);
+    active = next;
+    if (cells.length) rows.push(cells);
+  }
+  const spans = anchors.filter(([, , height, width]) => height > 1 || width > 1);
+  if (spans.length) {
+    const width = Math.max(...rows.map(row => row.length));
+    if (rows.length * width > 100000) throw new AppError("document_budget_exceeded", "Word table grid exceeds the supported size.");
+    const padded = rows.map(row => Array.from({ length: width }, (_, i) => escapeMarkdownTableCell(row[i] || "")));
+    const line = row => `| ${row.join(" | ")} |`;
+    return `<!-- schema-table: ${JSON.stringify({ v: 1, rows: rows.length, cols: width, spans })} -->\n`
+      + [line(padded[0]), line(Array(width).fill("---")), ...padded.slice(1).map(line)].join("\n");
+  }
   return markdownTable(rows);
 }
 export function docxDocumentXmlToMarkdown(documentXml, sourceName = "source.docx", relsXml = "", noteXmls = {}, options = {}) {
+  documentXml = selectDocxAlternatives(documentXml);
   const relationshipTargets = readRelationshipTargets(relsXml);
   const notes = readNotes(noteXmls, relationshipTargets);
   const body = getXmlBlocks(documentXml, "w:body")[0] ?? documentXml;
   const blocks = [];
   const numbering = readNumbering(options.numberingXml);
   const counters = new Map();
-  const blockPattern = /<w:(p|tbl)(?:\s[^>]*)?>[\s\S]*?<\/w:\1>/g;
-  let match;
-  while ((match = blockPattern.exec(body)) !== null) {
-    const blockXml = match[0];
-    const markdown = match[1] === "tbl"
+  const listStack = [];
+  for (const blockXml of getXmlBlocks(body, ["w:p", "w:tbl"])) {
+    let markdown = blockXml.startsWith("<w:tbl")
       ? tableToMarkdown(blockXml, relationshipTargets, notes, options.mediaTargets)
       : paragraphToMarkdown(blockXml, relationshipTargets, notes, options.mediaTargets, numbering, counters);
     if (markdown) {
+      const list = /^( *)(\d+\. |[-+*] )/.exec(markdown);
+      if (list && (hasTag(blockXml, "w:numPr") || /ListParagraph/i.test(blockXml))) {
+        const level = list[1].length;
+        while (listStack.length && listStack.at(-1).level > level) listStack.pop();
+        if (!listStack.length || listStack.at(-1).level < level) {
+          const indent = listStack.length ? listStack.at(-1).contentIndent : (level < 4 ? level : 0);
+          listStack.push({ level, indent, contentIndent: indent + list[2].length });
+        }
+        listStack.at(-1).contentIndent = listStack.at(-1).indent + list[2].length;
+        // Word levels may resume after ordinary prose without a Markdown
+        // parent. Orphan indentation would turn text and images into code.
+        markdown = " ".repeat(listStack.at(-1).indent) + markdown.trimStart();
+      } else listStack.length = 0;
       blocks.push(markdown);
     }
   }
@@ -369,7 +411,7 @@ export function docxDocumentXmlToMarkdown(documentXml, sourceName = "source.docx
 }
 export const docxMarkdownConverter = {
   name: "docx-markdown-converter",
-  cacheVersion: "5",
+  cacheVersion: "9",
   canHandle(file) {
     return path.extname(file.sourcePath ?? file).toLowerCase() === ".docx";
   },
@@ -432,7 +474,8 @@ export const docxMarkdownConverter = {
         originalError: err.message
       });
     }
-    const markdown = docxDocumentXmlToMarkdown(documentXml, input.sourceName || path.basename(input.sourcePath), relsXml, {
+    const drawingResult = await preserveDocxDrawings(documentXml, input, mediaTargets);
+    const markdown = docxDocumentXmlToMarkdown(drawingResult.xml, input.sourceName || path.basename(input.sourcePath), relsXml, {
       footnotesXml,
       endnotesXml
     }, { mediaTargets, numberingXml });
@@ -441,7 +484,7 @@ export const docxMarkdownConverter = {
     const hasNotes = Boolean(footnotesXml || endnotesXml) && /<w:(footnote|endnote)\b/.test(`${footnotesXml}\n${endnotesXml}`);
     const warnings = [];
     if (hasTables) {
-      warnings.push("Table layout simplified: tables were converted to Markdown tables; merged cells and complex row/column spans may be lost.");
+      warnings.push("Table styles simplified; supported Word grid spans are retained in Markdown geometry metadata and structured exports. Nested tables and irregular merge declarations still require review.");
     }
     if (hasLinks) {
       warnings.push("Hyperlinks preserved where DOCX relationship targets are available.");
@@ -450,7 +493,10 @@ export const docxMarkdownConverter = {
       warnings.push("Footnotes and endnotes preserved as Markdown reference notes where note bodies are available.");
     }
     warnings.push("Page layout simplified: complex Word/WPS layout, comments, and revisions are not preserved; text, headings, lists, and basic tables are extracted.");
-    if (mediaTargets.size) warnings.push(`Preserved ${mediaTargets.size} Word/WPS image asset(s) as local Markdown images.`);
+    if (mediaTargets.size) warnings.push(`Extracted ${mediaTargets.size} Word/WPS media asset(s); only referenced media is linked in Markdown.`);
+    const omittedDrawings = (markdown.match(/\[Drawing not converted;/g) || []).length;
+    if (drawingResult.rendered) warnings.push(`Preserved ${drawingResult.rendered} Word drawing group(s) from source geometry as images; visual review is required and mathematical meaning has not been reconstructed.`);
+    if (omittedDrawings) warnings.push(`${omittedDrawings} Word drawing groups could not be converted; inspect them in the retained source document.`);
     if (convertedMetafiles) warnings.push(`Converted ${convertedMetafiles} legacy Word/WPS WMF/EMF preview image(s) to browser-compatible PNG.`);
     if (hasTag(documentXml, "m:oMath")) warnings.push("Word/WPS equations converted from OMML to editable Markdown LaTeX where supported.");
     warnings.push("Unsupported Word/WPS rich objects such as SmartArt, embedded OLE objects, macros, and VBA are not executed during Markdown extraction.");
@@ -461,7 +507,10 @@ export const docxMarkdownConverter = {
       layoutSimplified: true,
       possibleMojibake: false,
       unsupportedFeatures: ["styles", "annotations", "revisions", "smartart", "embedded_objects", "macros", "vba"],
-      confidence: "high"
+      confidence: omittedDrawings || drawingResult.rendered ? "medium" : "high",
+      omittedDrawings,
+      visualFallbackRegions: drawingResult.rendered,
+      failedVisualRegions: omittedDrawings
     };
     return {
       markdown,
@@ -470,7 +519,7 @@ export const docxMarkdownConverter = {
         hasTextLayer: true,
         hasTablesSimplified: hasTables,
         hasOcrMissing: false,
-        confidence: "high"
+        confidence: omittedDrawings || drawingResult.rendered ? "medium" : "high"
       },
       extractionQuality
     };

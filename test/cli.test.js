@@ -21,6 +21,7 @@ import {
   uiCheckPath,
   webUiSmokePath
 } from "./helpers/cliHarness.js";
+const DESKTOP_RUNTIME_READY_TIMEOUT_MS = 20_000;
 const exportLibraryFiles = [
   "public/libs/markdown-it.min.js",
   "public/libs/docx.js",
@@ -204,6 +205,13 @@ test("desktop preview check starts a local runtime without opening the app", asy
   assert.equal(path.dirname(result.sessionPath), sessionDir);
   assert.equal(JSON.parse(await readFile(result.sessionPath, "utf8")).baseUrl, result.baseUrl);
 });
+test("desktop runtime readiness waits stay bounded for concurrent startup", async () => {
+  const bridgeSource = await readFile(desktopBridgeSmokePath, "utf8");
+  const timeoutDeclaration = bridgeSource.match(/const DESKTOP_RUNTIME_READY_TIMEOUT_MS = ([\d_]+);/);
+  assert.ok(timeoutDeclaration, "desktop bridge smoke must declare a bounded readiness timeout");
+  assert.equal(Number(timeoutDeclaration[1].replaceAll("_", "")), DESKTOP_RUNTIME_READY_TIMEOUT_MS);
+  assert.match(bridgeSource, /}, DESKTOP_RUNTIME_READY_TIMEOUT_MS\);/);
+});
 test("desktop runtime launcher writes session to configured writable directory", async () => {
   const sessionDir = await mkdtemp(path.join(os.tmpdir(), "schema-docs-runtime-session-"));
   const child = spawn(process.execPath, [desktopRuntimeLauncherPath, "18141"], {
@@ -218,7 +226,10 @@ test("desktop runtime launcher writes session to configured writable directory",
   let result;
   try {
     result = await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error("desktop runtime launcher did not become ready")), 5000);
+      const timeout = setTimeout(
+        () => reject(new Error("desktop runtime launcher did not become ready")),
+        DESKTOP_RUNTIME_READY_TIMEOUT_MS
+      );
       child.stdout.on("data", (chunk) => {
         stdout += chunk.toString();
         try {
@@ -257,6 +268,13 @@ test("desktop bridge smoke can verify a source runtime root", async () => {
   assert.equal(result.runtime.port, 18142);
   assert.equal(result.health.body.data.service, "schema-docs-local-api");
   assert.equal(result.runtime.sessionWriteError, "");
+  assert.deepEqual(result.cleanup, {
+    ok: true,
+    forced: false,
+    stillRunning: false,
+    sessionRemoved: true,
+    error: ""
+  });
 });
 test("desktop app smoke check-only validates a packaged app path without launching GUI", async () => {
   const { filePath: fakeApp } = await makeTempPath("schema-docs-app-smoke-", process.platform === "win32" ? "app.exe" : "app");

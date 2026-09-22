@@ -1,3 +1,56 @@
+import { readTableMarker, validateTableGeometry } from "./tableGeometry.js";
+
+function statusErrorMessage(error) {
+ return error?.message || String(error || "Unknown export error");
+}
+
+export function createExportStatusController({ container, statusText, pathText, folderButton }) {
+ function render({ text, path = "", color = "var(--primary)", showFolder = false, onOpen = null }) {
+  container?.classList?.remove("hidden");
+  if (statusText) {
+   statusText.textContent = text;
+   statusText.style.color = color;
+  }
+  if (pathText) pathText.textContent = path;
+  if (folderButton) {
+   folderButton.style.display = showFolder ? "inline-block" : "none";
+   folderButton.onclick = showFolder && typeof onOpen === "function" ? onOpen : null;
+  }
+ }
+ return {
+  waiting(path = "Choose a destination in the system save dialog.") {
+   render({ text: "Waiting for save location...", path });
+  },
+  running(text, path = "") {
+   render({ text, path });
+  },
+  cancelled(path = "No file was exported.") {
+   render({ text: "cancelled", path, color: "var(--text-muted)" });
+  },
+  completed(path, onOpen) {
+   render({ text: "completed", path, color: "#10b981", showFolder: true, onOpen });
+  },
+  failed(error) {
+   render({ text: "failed", path: statusErrorMessage(error), color: "#ef4444" });
+  }
+ };
+}
+
+export async function requestExportSavePath({ status, selectPath }) {
+ try {
+  status.waiting();
+  const selected = await selectPath();
+  if (!selected) {
+   status.cancelled();
+   return "";
+  }
+  return selected;
+ } catch (error) {
+  status.failed(error);
+  throw error;
+ }
+}
+
 export function createMarkdownWorkbenchPanel({ $, state, run, saveCurrentNote, refreshVersions, escapeHtml, openMarkdownPath, api, localApiBaseUrl, showAlert, onNoteClosed }) {
 let activeSearchIndex = 0;
 let renderTimer = 0;
@@ -372,12 +425,19 @@ listType = type;
 };
 const flushTable = () => {
 if (!table.length) return;
+const sourceRows = table.filter((_, index) => index !== 1).map(row => splitMarkdownTableRow(row.text).cells);
+const geometry = validateTableGeometry(readTableMarker(lines[table[0].line - 1]), sourceRows);
  html.push('<div class="markdown-table-scroll"><table>');
 table.forEach((row, index) => {
 if (/^\|\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(row.text)) return;
 const cells = splitMarkdownTableRow(row.text).cells.map((cell) => renderInlineMarkdown(cell));
 const tag = index === 0 ? "th" : "td";
-html.push(`<tr data-line-start="${row.line}">${cells.map((cell, cellIndex) => `<${tag} data-line-start="${row.line}" data-table-cell="${cellIndex}">${cell}</${tag}>`).join("")}</tr>`);
+html.push(`<tr data-line-start="${row.line}">${cells.map((cell, cellIndex) => {
+const key = `${index === 0 ? 0 : index-1}:${cellIndex}`;
+if (geometry?.covered.has(key)) return "";
+const span = geometry?.anchors.get(key);
+return `<${tag}${span?.rowSpan > 1 ? ` rowspan="${span.rowSpan}"` : ""}${span?.columnSpan > 1 ? ` colspan="${span.columnSpan}"` : ""} data-line-start="${row.line}" data-table-cell="${cellIndex}">${cell}</${tag}>`;
+}).join("")}</tr>`);
 });
  html.push("</table></div>");
 table = [];
@@ -429,6 +489,10 @@ if (/^```/.test(trimmed)) {
    }
    if (codeOpen) {
     html.push(escapeHtml(line));
+    continue;
+   }
+   if (readTableMarker(trimmed)) {
+    flushParagraph(); flushList(); flushTable();
     continue;
    }
    if (!trimmed) {
@@ -1717,13 +1781,16 @@ renderMarkdownReadView();
 if (typeof onNoteClosed === "function") onNoteClosed();
 });
 $("btnChooseDocExportPath")?.addEventListener("click", () => run(async () => {
-return chooseNativeSavePath("docExportPath", "Word Document", ["docx"]);
+const selected = await chooseNativeSavePath("docExportPath", "Word Document", ["docx"]);
+return selected || { cancelled: true };
 }));
 $("btnChoosePdfExportPath")?.addEventListener("click", () => run(async () => {
-return chooseNativeSavePath("pdfExportPath", "PDF Document", ["pdf"]);
+const selected = await chooseNativeSavePath("pdfExportPath", "PDF Document", ["pdf"]);
+return selected || { cancelled: true };
 }));
 $("btnChooseHtmlExportPath")?.addEventListener("click", () => run(async () => {
-return chooseNativeSavePath("htmlExportPath", "HTML Document", ["html"]);
+const selected = await chooseNativeSavePath("htmlExportPath", "HTML Document", ["html"]);
+return selected || { cancelled: true };
 }));
 $("tabOutline")?.addEventListener("click", () => {
 $("tabOutline").classList.add("active");

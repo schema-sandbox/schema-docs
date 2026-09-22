@@ -373,6 +373,10 @@ test("release-check validates desktop runtime bridge and current size budget", a
       workspaceCommand: "select_workspace_path",
       importFileCommand: "select_import_file_path",
       markdownFileCommand: "select_markdown_file_path",
+      saveFileCommand: "select_save_file_path",
+      importDirectoryCommand: "select_import_directory_path",
+      dialogPlugin: "tauri-plugin-dialog",
+      dialogOwner: "set_parent(&window)",
       uiControls: ["chooseWorkspace", "dropZone", "fileInput"],
       importFormats: ["docx", "pptx", "pdf", "txt", "csv", "xlsx", "xls"],
       openFormats: ["md", "markdown"]

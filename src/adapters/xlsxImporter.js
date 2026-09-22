@@ -113,11 +113,22 @@ cells[columnLettersToIndex(ref)] = cellValue(cellXml, sharedStrings, cellStyles)
 }
 return Array.from({ length: cells.length }, (_, index) => cells[index] ?? "");
 });
+const sourceCells = rowBlocks.flatMap((rowXml) => {
+const cellBlocks = rowXml.match(/<c\b[^>]*\/>|<c\b[^>]*>[\s\S]*?<\/c>/g) ?? [];
+return cellBlocks.map((cellXml) => {
+const tag = /^<c\b[^>]*>/.exec(cellXml)?.[0] ?? cellXml;
+const formula = getXmlTextValues(cellXml, "f")[0] ?? null;
+return { address: getAttribute(tag, "r") ?? "", type: getAttribute(tag, "t") ?? null,
+ value: cellValue(cellXml, sharedStrings, cellStyles), rawValue: getXmlTextValues(cellXml, "v")[0] ?? null,
+ formula, hasFormula: Boolean(formula) };
+});
+});
 if (rows.length === 0) return {
 sheetId: sheetMeta.sheetId ?? "sheet1",
 name: sheetMeta.name ?? "Sheet1",
 columns: [],
 previewRows: [],
+sourceCells,
 totalRowsEstimate: 0
 };
 const populatedRows = rows
@@ -229,6 +240,10 @@ preambleRowNumbers: rows.slice(0, headerRowIndex)
 .map((entry) => entry.sourceRow),
 headerRowIndex,
 totalRowsEstimate: sourceDataRows.length
+ ,sourceCellCount: (sheetXml.match(/<c\b[^>]*>/g) || []).length
+ ,sourceFormulaCount: (sheetXml.match(/<f\b[^>]*>/g) || []).length
+ ,mergedRanges: (sheetXml.match(/<mergeCell\b[^>]*>/g) || []).map(tag => getAttribute(tag, 'ref')).filter(Boolean)
+ ,sourceCells
 };
 }
 function readWorkbookSheets(workbookXml) {
@@ -314,7 +329,9 @@ const sheets = [];
 for (let i = 0; i < sheetDefs.length; i++) {
 const def = sheetDefs[i];
 let relTarget = relsMap.get(def.rId) ?? "";
-if (relTarget && !relTarget.startsWith("xl/")) {
+if (relTarget.startsWith("/")) {
+relTarget = relTarget.slice(1);
+} else if (relTarget && !relTarget.startsWith("xl/")) {
 relTarget = `xl/${relTarget}`;
 }
 const zipPath = relTarget || zipEntries[i] || `xl/worksheets/sheet${i + 1}.xml`;
