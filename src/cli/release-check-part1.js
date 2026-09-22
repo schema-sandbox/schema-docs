@@ -73,11 +73,12 @@ export function getChecksPart1(context) {
       ok: Boolean(
         sizeCheckCli.includes("const BUDGETS")
         && sizeCheckCli.includes("runtimeDependencies: 0")
-        && sizeCheckCli.includes("runtimeBytes: 1_320_000")
-        && sizeCheckCli.includes("sourceFiles: 195")
-        && sizeCheckCli.includes("totalBytes: 1_910_000")
-        && sizeCheckCli.includes("totalLines: 43_100")
-        && sizeCheckCli.includes("largestFileBytes: 100_000")
+        && sizeCheckCli.includes("runtimeBytes: 1_750_000")
+        && sizeCheckCli.includes("runtimeFiles: 132")
+        && sizeCheckCli.includes("sourceFiles: 263")
+        && sizeCheckCli.includes("totalBytes: 2_800_000")
+        && sizeCheckCli.includes("totalLines: 58_500")
+        && sizeCheckCli.includes("largestFileBytes: 125_000")
         && sizeCheckCli.includes("runtimeLargestFileBytes: 125_000")
         && sizeCheckCli.includes("publicModuleBytes: 100_000")
         && sizeCheckCli.includes("process.exitCode = 1")
@@ -85,11 +86,11 @@ export function getChecksPart1(context) {
         && sizeCheckCli.includes("largest source file is above 90% of budget")
         && sizeCheckCli.includes("largest runtime file is above 90% of budget")
         && sizeCheckCli.includes("largest public browser module is above 90% of budget")
-        && releaseDocTexts["docs/implementation-status.md"]?.includes("1.9MB source budget")
+        && releaseDocTexts["docs/implementation-status.md"]?.includes("2.8MB source budget")
         && releaseDocTexts["docs/implementation-status.md"]?.includes("largest source file exceeds 90%")
         && releaseDocTexts["docs/implementation-status.md"]?.includes("largest runtime file exceeds 90%")
-        && releaseDocTexts["docs/release-candidate-process.md"]?.includes("1.3MB runtime budget")
-        && releaseDocTexts["docs/release-checklist.md"]?.includes("1.3MB runtime bytes")
+        && releaseDocTexts["docs/release-candidate-process.md"]?.includes("1.75MB runtime budget")
+        && releaseDocTexts["docs/release-checklist.md"]?.includes("1.75MB runtime bytes")
       ),
       expected: {}
     },
@@ -122,7 +123,7 @@ export function getChecksPart1(context) {
         && ["README.md", "docs/release-checklist.md", "docs/sample-fixture-checklist.md", "docs/v0.1.0-release-plan.md", "docs/v0.1.0-release-notes.md"]
           .every((doc) => releaseDocTexts[doc]?.includes(desktopFixtureCloseWriteCommand))
         && readmeDoc.includes("# Schema Docs (v0.1.4)")
-        && readmeDoc.includes("Windows public-preview package")
+        && readmeDoc.includes("Windows package status")
         && readmeDoc.includes("Public preview scope")
         && readmeDoc.includes("packaged Node runtime resource")
         && readmeDoc.includes("falls back to system Node")

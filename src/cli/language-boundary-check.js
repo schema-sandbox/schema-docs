@@ -57,6 +57,10 @@ const allowedMultilingualPatterns = [
   /^docs\/public-preview-manual-test-checklist\.md$/,
   /^docs\/public-preview-sample-report\.md$/,
   /^docs\/demo-flow\.md$/,
+  /^docs\/docling-inspired-quality-roadmap\.md$/,
+  /^docs\/table-model-trial\.md$/,
+  /^scripts\/prepare-table-model-trial\.py$/,
+  /^docs\/execution-audit-\d{4}-\d{2}-\d{2}\.md$/,
   /^VERSION-ROADMAP\.md$/,
   /^office_worker_testing_report\.md$/,
   /^officecli_analysis\.md$/,
@@ -116,6 +120,17 @@ function resolveRoot(argv = process.argv.slice(2)) {
   return path.resolve(argValue("--root", defaultRoot, argv));
 }
 
+async function listTrackedFiles(root) {
+  const { stdout } = await execFileAsync("git", [
+    "-c", "core.quotePath=false",
+    "ls-files", "--cached", "--others", "--exclude-standard", "-z"
+  ], {
+    cwd: root,
+    maxBuffer: 64 * 1024 * 1024
+  });
+  return stdout.split("\0").filter(Boolean);
+}
+
 async function listFiles(root) {
   try {
     const { stdout } = await execFileAsync("rg", [
@@ -129,7 +144,12 @@ async function listFiles(root) {
       maxBuffer: 16 * 1024 * 1024
     });
     return stdout.split(/\r?\n/).filter(Boolean);
-  } catch (err) {
+  } catch {
+    // rg and git both apply .gitignore; the raw scan cannot, so it must name the generated trees itself.
+  }
+  try {
+    return await listTrackedFiles(root);
+  } catch {
     const results = [];
     async function scan(dir) {
       const entries = await readdir(dir, { withFileTypes: true });
@@ -141,6 +161,10 @@ async function listFiles(root) {
           normRel.startsWith("node_modules") ||
           normRel.startsWith("src-tauri/target") ||
           normRel.startsWith(".git") ||
+          normRel === "runtime" ||
+          normRel.startsWith("runtime/") ||
+          normRel === ".ai-doc-exchange" ||
+          normRel.startsWith(".ai-doc-exchange/") ||
           normRel === "__pycache__" ||
           normRel.startsWith("__pycache__/") ||
           normRel.includes("/__pycache__/") ||

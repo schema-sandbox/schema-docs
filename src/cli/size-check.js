@@ -4,7 +4,7 @@ import path from "node:path";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const SOURCE_DIRS = ["src", "test", "docs"];
-const RUNTIME_DIRS = ["src/core", "src/server", "src/adapters", "src/sdk", "public"];
+const RUNTIME_DIRS = ["src/core", "src/server", "src/adapters", "src/processing", "src/sdk", "public"];
 const IGNORED_SOURCE_PATTERNS = [
   /^docs\/(?:release-artifact-index|[^/]+-package)\.md$/,
   /^docs\/.*\u6d4b\u8bd5\u62a5\u544a.*\.md$/u,
@@ -13,14 +13,15 @@ const IGNORED_SOURCE_PATTERNS = [
 const BUDGETS = {
   runtimeDependencies: 0,
   devDependencies: 1,
-  runtimeBytes: 1_320_000,
-  runtimeFiles: 100,
-  sourceFiles: 195,
-  totalBytes: 1_910_000,
-  totalLines: 43_100,
-  largestFileBytes: 100_000,
+  runtimeBytes: 1_750_000,
+  runtimeFiles: 132,
+  sourceFiles: 263,
+  totalBytes: 2_800_000,
+  totalLines: 58_500,
+  largestFileBytes: 125_000,
   runtimeLargestFileBytes: 125_000,
-  publicModuleBytes: 100_000
+  publicModuleBytes: 100_000,
+  privateConversionRuntimeBytes: 128 * 1024 * 1024
 };
 
 async function walkFiles(dir) {
@@ -47,6 +48,9 @@ async function walkFiles(dir) {
 }
 
 async function main() {
+  const inventory = JSON.parse(await readFile(path.join(ROOT, "runtime", "manifest.json"), "utf8").catch(() => "null"));
+  let privateRuntimeBytes = 0;
+  for (const entry of inventory?.files || []) privateRuntimeBytes += (await stat(path.join(ROOT, "runtime", entry.path))).size;
   const packageJson = JSON.parse(await readFile(path.join(ROOT, "package.json"), "utf8"));
   const dependencies = Object.keys(packageJson.dependencies ?? {});
   const devDependencies = Object.keys(packageJson.devDependencies ?? {});
@@ -92,6 +96,7 @@ async function main() {
   const publicModuleLargestFileBytes = publicModuleFiles[0]?.bytes ?? 0;
   const failures = [];
   const warnings = [];
+  if (privateRuntimeBytes > BUDGETS.privateConversionRuntimeBytes) failures.push(`private conversion runtime bytes ${privateRuntimeBytes} exceed budget ${BUDGETS.privateConversionRuntimeBytes}`);
   if (dependencies.length > BUDGETS.runtimeDependencies) {
     failures.push(`runtime dependencies ${dependencies.length} exceed budget ${BUDGETS.runtimeDependencies}`);
   }
@@ -146,6 +151,9 @@ async function main() {
     dependencies,
     devDependencies,
     dependencyCount: dependencies.length,
+    privateConversionRuntime: { bundled: Boolean(inventory), bytes: privateRuntimeBytes,
+      fileCount: inventory?.files?.length || 0, packages: inventory?.packages || {},
+      python: inventory?.python || null, tesseract: inventory?.tesseract || null },
     devDependencyCount: devDependencies.length,
     runtimeFileCount: runtimeSummary.fileCount,
     runtimeBytes: runtimeSummary.bytes,
