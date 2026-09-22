@@ -220,6 +220,16 @@ def reattach_inline_operator_baselines(page):
                 continue
             if operator_top - line["top"] > operator_size * 1.45:
                 continue
+            # A glyph whose box starts below the prose line's own box is not a
+            # displaced inline operator: it sits on the following line and owns
+            # its own baseline.  Pulling it up is what turns a tail line such as
+            # ``as n -> infinity`` into a marker inside the sentence above, and
+            # it crops the wrong pixels because the recorded box then covers the
+            # prose line rather than the glyph.
+            if operator_top >= max(
+                float(char.get("bottom", char.get("top", 0))) for char in line["chars"]
+            ):
+                continue
             if len(line["chars"]) < 3:
                 continue
             left = min(float(char.get("x0", 0)) for char in line["chars"]) - operator_size
