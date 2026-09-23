@@ -422,7 +422,9 @@ for y, line in [(600, 'The international summary stays brief.'),
                 (586, 'The inter-'),
                 (572, 'national report should merge the word.'),
                 (544, 'The hydrogen-'),
-                (530, 'bonded pair stays apart.')]:
+                (530, 'bonded pair stays apart.'),
+                (516, 'A term of 1-'),
+                (502, 'year applies to the lease.')]:
     text(40, y, line)
 page.gen_content(); doc.save(sys.argv[1]); page.close(); doc.close()
 `;
@@ -435,6 +437,10 @@ page.gen_content(); doc.save(sys.argv[1]); page.close(); doc.close()
     // It never spells "hydrogenbonded", so that hyphen is the author's.
     assert.match(markdown, /hydrogen-bonded pair stays apart\./, markdown);
     assert.doesNotMatch(markdown, /hydrogenbonded/, markdown);
+    // A hyphen with no fragment before it has nothing to look up: the "year" the
+    // document spells out is no evidence that "1-" was a break.
+    assert.match(markdown, /A term of 1-year applies to the lease\./, markdown);
+    assert.doesNotMatch(markdown, /1year/, markdown);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

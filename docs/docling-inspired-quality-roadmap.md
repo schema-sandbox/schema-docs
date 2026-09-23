@@ -840,3 +840,34 @@ cf. 1962A third body sentence closes it here.
 **明确记录、本轮不做的边界。** (1) JS 侧的页内连接器 `joinPdfParagraphLines` 仍无条件丢连字符：`built-in` 抽取路径（以及「页后端未优先」时的文本）仍会把 `backward-induction` 拼掉。它的词表可以免费取自文内 `lines`，判据与本次相同，但改动会翻转 `test/core-documents.test.js` 里那条既有断言（`The international report should merge hyphenated words.`，其词表里并没有 `international`），本轮不动，留作下一项。(2) 词表按整份文件建：对 1493 页的书只要 8 页，也要付那 16s；换来的是页窗无关的确定性。(3) 词表本身未做缓存，只依赖既有的页缓存 identity（含全部 `pdf*.py` 哈希）在源码变更时整体失效。(4) 软连字符一律按断词处理，不查词表。
 
 **证据位置。** `.ai-doc-exchange/crosspage-probe/`：`hyphen-class.py`（逐 join 分类，含 `attestedDoc` 与翻转样本）、`hyphen-class-run.sh`（六个窗口的批量入口）、`hyphen-join.py`（早期按页/窗/文三档作用域对照的探针）、`hyphen-ab.sh` 与 `measure.mjs`（9 窗口 A/B）、`hyphen-pages.py` 与 `hyphen-pages-run.sh`/`hyphen-pages-run2.sh`（逐页改动清单：一次抽取内同时跑新旧规则并对照，用 production 的 `PdfPageWindow` 页源）、`hyphen-pages-full.py` 与 `hyphen-pages-full-run.sh`（同一件事但打印整行，供差异落在行首时定性）、`hyphen-after-check.mjs`（直接读改后 markdown 的连字符清单）、`word-pass-memory.py`（词表遍的 psutil 峰值与重开对照），均为可重跑小脚本。
+
+## §36 内置文本层连接器同样按文内词表判定，两侧判据逐字对齐（2026-09-23）
+
+**背景与结论。** §35 边界(1) 记下的是 JS 侧 `joinPdfParagraphLines` 仍无条件丢行尾连字符：`built-in` 抽取路径（以及「页后端未优先」时的文本）会把 `backward-induction` 拼成 `backwardinduction`。本轮把它搬到同一条判据上，词表取自这条路径自己读到的全部文本行；并且两侧一起堵掉一个此前都在的洞：连字符前不足两个字母时（`1-` + `year`）虽然取不出片段，旧实现却拿「后半词本身是不是词」当证据，于是把 `1-year` 粘成 `1year`。
+
+**规则（`joinPdfParagraphLines`）。** 与 Python 的 `join_prose_line` 逐条对应：进入条件是 `prev` 以 `-` 或软连字符（U+00AD）结尾、且前一个字符是字母或数字（`[\p{L}\p{N}][-\u00ad]$`，对方是 `previous[-2].isalnum()`）；片段取连字符前 2 个以上字母（`[^\W\d_]{2,}`），后半词首取字母串（`[^\W\d_]+`）；只有后半词首是小写、且「片段+后半词」在词表里出现过，才丢掉连字符拼合；软连字符按定义拼合。**没有证据就保留连字符，且不插空格**——`backward-induction`、`hill-side`、`1-year` 都原样留下。词表由 `documentWordSet(lines)` 在 `pdfLinesToMarkdown` 里建一次，token `\p{L}{3,}` 正对 Python 的 `DOCUMENT_WORD = [^\W\d_]{3,}`；内置路径一次读完整个 buffer 的全部解压流，所以两侧同样都是「按整份文档建表」。两处注释互相指认对方。
+
+**判据对齐顺手改掉的一处。** §35 记录里 Ecology 的 `1-year` 被列为「翻转为保留」，而当时的 production 会把它粘成 `1year`：逐 join 分类按「拼合形是否在文内作为独立词出现过」判定（`1year` 从不出现 → 保留），production 却在片段为空时退化成拿 head 单查词表（`year` 在词表里 → 拼合）。本轮两侧都要求片段非空才谈证据，production 与那份分类现在给出同一个答案，§35 的 `1-year` 也才对得上。
+
+**逐 join 测量（真实材料）。** 探针 `hyphen-textlayer.mjs` 用同一个 buffer 分别跑本 worktree 与 HEAD worktree 的内置路径，按行对照（`node hyphen-textlayer.mjs <head-worktree> [out.json] [labels]`）。这条路径能进的材料只有五个——三本大书撑不住 256 MB 的解压上限——其中 arxiv、unit-distance、Math4Kids 的文本层本身是乱码（arxiv 行内是 NUL 分隔的碎片，另两份是字体偏移密码），能逐行读的只有 math-deep 与 Feynman：
+
+| 材料 | 行数 | 变化行 | 保留连字符 | 仅空白差异 | 丢弃连字符 |
+| --- | --- | --- | --- | --- | --- |
+| arxiv 1512.06808v1 | 18,627 | 98 | 0 | 72 | 0 |
+| unit-distance-cot | 6,883 | 111 | 25 | 42 | 0 |
+| math-deep | 68,832 | 71 | 57 | 29 | 0 |
+| Math4Kids | 4,323 | 12 | 6 | 3 | 0 |
+| Feynman（全三卷） | 39,419 | 101 | 84 | 54 | 0 |
+| 合计 | 138,084 | 393 | 172 | 200 | 0 |
+
+（两类互有重叠，不是相加关系。）「保留连字符」指新输出把旧输出粘掉的 `片段-后半词` 还原；「仅空白差异」指唯一差别是旧实现插在行尾连字符后面那个空格。**丢弃连字符一栏全为 0**：新规则丢连字符的条件（有证据）在旧规则下必然也丢（旧规则只看 `[A-Za-z]-` 加小写开头，条件更宽），唯一可能反向的是「连字符前是非 ASCII 字母」，实测 0 例。各材料前后行数一致（`lineCountStable` 全为 true）。
+
+**抽样定性。** 两份可读材料的 141 处保留逐条看过，复合词还原是压倒性多数（约 120 处）：math-deep 的 `finite-dimensional`（文本层把 fi 连字写成四个字符 `\014`，单这一族 19 处）、`skew-symmetric`、`upper-triangular`、`well-de(fined)`、`torsion-free`、`cross-ratio`、`pseudo-inverse`、`low-rank`、`real-valued`、`second-countable`；Feynman 的 `quantum-mechanical` 与 `quantum-mechanically`（11 处）、`four-vector`、`half-integer`、`high-frequency`、`old-fashioned`、`ever-increasing`、`fast-moving`、`root-mean-square`、`anti-so-and-so`、`x-radiation`、`McGraw-Hill`、`Opponent-Response`、`Clausius-Clapeyron`、`mountain-forming`、`electron-ray`。退化（断词，而拼合形在文内从未无连字符出现，于是连字符被保留）约 17 处，与 §35 记录的是同一类：math-deep 的 `parti-tioning`、`specif-ically`、`sepa-rations`、`connec-tions`、`conju-gating`、`Soci-ety`、`adju-gates`、`con-notation`，Feynman 的 `antic-ipate`（3 处）、`white-ness`、`unfor-tunate`、`thun-dercloud`、`micro-microamperes`、`nonessen-tial`。用另外两份文档的词表（跨文档语料）能**证明**其中 5 处的拼合形是别处写出来的真词（`specif-ically`、`sepa-rations`、`connec-tions`、`Soci-ety`、`unfor-tunate`），其余靠逐行判定——两份文档的语料给的是下界，不是全量。图文交错与跨区垃圾（`stabi-Figure`、`higher-Fig`、`space-e`）保留源文的连字符不比粘合差。
+
+**为什么值得换。** 旧行为对复合词密排的正文是百分之百的破坏，新行为把复合词原样留下，收益与代价在可读材料上约 7:1；词表来自同一份文档，结果只取决于文档内容，与 §35 一样与「请求了哪些页」无关。代价（约 17 处）集中在「整本文档只出现一次、且那次刚好断行」的普通断词上，§35 已在 Python 侧记录了同一类，两侧行为现在是同一份答案。
+
+**回归件。** `test/core-documents.test.js` 那条既有断言（`The international report should merge hyphenated words.`）本来会翻转，本轮改成三件事一起证：fixture 里先出现 `The international standard applies.`（词表证据），于是 `inter-` / `national` 照旧拼合；`A hill-` / `side orchard …` 见证不成词就保留连字符（`hill-side`，且不出现 `hillside`）；`A term of 1-` / `year applies …` 证片段为空即无证据（`1-year`，且不出现 `1year`）。`test/pdf-page-flow.test.js` 的 §35 用例在真实 PDF 上补同一组第三例（`1-year`、不出现 `1year`），Python 侧因此也被锁住。
+
+**明确记录、本轮不做的边界。** (1) 「仅空白差异」这一类是判据对齐的副产物：行尾连字符后面不是小写字母（大写开头、数字、控制字符）时，旧实现插空格，现在不插——源文本来就是紧挨着的。 (2) 词表建在「这条路径读到的全部文本行」上，不含布局信息；文档文本层本身乱码时（arxiv、unit-distance、Math4Kids），词表也是乱码，判据照旧执行但不保证正确。 (3) 三本大书仍进不了这条路径（解压上限 256 MB），所以代价与收益只能在上述五份材料上度量。 (4) 空白压缩 `.replace(/\s+/g, " ")` 保持原样，未并入本轮。
+
+**证据位置。** `.ai-doc-exchange/crosspage-probe/`：`hyphen-textlayer.mjs`（A/B，含跨文档词表判定与逐行窗口）、`hyphen-split.mjs`（把变化行分成「保留连字符」与「仅空白差异」）、`hyphen-spaceonly.mjs`（只列空白差异类，供逐行定性）、`byte-hygiene.py`（软连字符字面量、CR、BOM 的字节卫生检查），均为可重跑小脚本。

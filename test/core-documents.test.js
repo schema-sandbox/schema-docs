@@ -540,8 +540,16 @@ test("pdf text layer extraction joins broken paragraphs and preserves table-like
     "across two text operations",
     "and should read cleanly.",
     "",
+    "The international standard applies.",
+    "",
     "The inter-",
     "national report should merge hyphenated words.",
+    "",
+    "A hill-",
+    "side orchard keeps the hyphen the source shows.",
+    "",
+    "A term of 1-",
+    "year applies to the lease.",
     "",
     "Name  Value",
     "Alpha  1",
@@ -550,7 +558,13 @@ test("pdf text layer extraction joins broken paragraphs and preserves table-like
   const markdown = await pdfBufferToMarkdown(pdf, "report.pdf");
   assert.match(markdown, /# Extracted Report/);
   assert.match(markdown, /This paragraph is broken across two text operations and should read cleanly\./);
+  assert.match(markdown, /The international standard applies\./);
   assert.match(markdown, /The international report should merge hyphenated words\./);
+  assert.doesNotMatch(markdown, /inter-\s*national/);
+  assert.match(markdown, /A hill-side orchard keeps the hyphen the source shows\./);
+  assert.doesNotMatch(markdown, /hillside/);
+  assert.match(markdown, /A term of 1-year applies to the lease\./);
+  assert.doesNotMatch(markdown, /1year/);
   assert.match(markdown, /\| Name \| Value \|/);
   assert.match(markdown, /\| Alpha \| 1 \|/);
 });

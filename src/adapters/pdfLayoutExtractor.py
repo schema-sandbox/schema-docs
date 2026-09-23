@@ -2242,13 +2242,14 @@ def join_prose_line(previous, current, vocabulary):
     replays a word spelled out elsewhere, while ``backward-induction`` never
     occurs unhyphenated, so joining it would invent ``backwardinduction``.  A
     soft hyphen is a break by definition.  Without that evidence the hyphen
-    stands, which is what the source shows.
+    stands, which is what the source shows.  A hyphen with fewer than two letters
+    before it spells no fragment at all, so there is nothing to look up and the
+    hyphen stays: ``1-`` + ``year`` is ``1-year``, not ``1year``.
     """
     if len(previous) > 1 and previous[-1] in ("-", "\u00ad") and previous[-2].isalnum():
         tail, head = HYPHEN_TAIL.search(previous), HYPHEN_HEAD.match(current)
         if head and head.group(1)[:1].islower():
-            fragment = tail.group(1) if tail else ""
-            if previous[-1] == "\u00ad" or f"{fragment}{head.group(1)}".lower() in vocabulary:
+            if previous[-1] == "\u00ad" or (tail and f"{tail.group(1)}{head.group(1)}".lower() in vocabulary):
                 return f"{previous[:-1]}{current}"
         return f"{previous}{current}"
     return f"{previous} {current}"

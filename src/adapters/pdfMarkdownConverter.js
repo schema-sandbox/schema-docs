@@ -350,11 +350,35 @@ if (isLikelyHeading(previous) || isLikelyHeading(current)) return false;
 if (/[.!?;:)\]"]$/.test(previous.trim())) return false;
  return previous.trim().length < 120 || current.trim().length < 100;
 }
-function joinPdfParagraphLines(previous, current) {
+// A line-end hyphen is either a break inside a word or a genuine compound, and
+// only the document's own vocabulary tells them apart: the pieces of `inter-` +
+// `national` spell a word the document also writes out, while
+// `backward-induction` never occurs unhyphenated, so joining it would invent
+// `backwardinduction`. A soft hyphen is a break by definition. Without that
+// evidence the hyphen stands, which is what the source shows. A hyphen with
+// fewer than two letters before it spells no fragment at all, so there is
+// nothing to look up and the hyphen stays. This rule and `join_prose_line` in
+// pdfLayoutExtractor.py are the same criterion over the same evidence: the
+// whole document each of them reads.
+function documentWordSet(lines) {
+ const words = new Set();
+ for (const line of lines) {
+  for (const word of String(line ?? "").toLowerCase().match(/\p{L}{3,}/gu) ?? []) words.add(word);
+ }
+ return words;
+}
+function joinPdfParagraphLines(previous, current, vocabulary) {
  const prev = previous.trim();
  const next = current.trim();
- if (/[A-Za-z]-$/.test(prev) && /^[a-z]/.test(next)) {
-  return `${prev.slice(0, -1)}${next}`.replace(/\s+/g, " ");
+ if (/[\p{L}\p{N}][-\u00ad]$/u.test(prev)) {
+  const tail = /(\p{L}{2,})[-\u00ad]$/u.exec(prev);
+  const head = /^(\p{L}+)/u.exec(next);
+  if (head && /^\p{Ll}/u.test(head[1])) {
+   if (prev.endsWith("\u00ad") || (tail && vocabulary.has((tail[1] + head[1]).toLowerCase()))) {
+    return `${prev.slice(0, -1)}${next}`.replace(/\s+/g, " ");
+   }
+  }
+  return `${prev}${next}`.replace(/\s+/g, " ");
  }
  return `${prev} ${next}`.replace(/\s+/g, " ");
 }
@@ -362,6 +386,7 @@ function pdfLinesToMarkdown(lines) {
  const cleaned = lines
   .map((line) => String(line ?? "").replace(/\t/g, " ").replace(/[ \u00a0]+$/g, "").trim())
   .filter((line) => !isPageNoise(line));
+ const vocabulary = documentWordSet(cleaned);
  const blocks = [];
  let tableRows = [];
  const flushTable = () => {
@@ -395,7 +420,7 @@ function pdfLinesToMarkdown(lines) {
   }
   const previous = blocks[blocks.length - 1] ?? "";
   if (shouldJoinPdfLine(previous, line)) {
-   blocks[blocks.length - 1] = joinPdfParagraphLines(previous, line);
+   blocks[blocks.length - 1] = joinPdfParagraphLines(previous, line, vocabulary);
   } else {
    blocks.push(line);
   }
