@@ -435,6 +435,31 @@ print(json.dumps(touched))
     [[18, "\n\ncf\n\n"], [19, "\n\nsee\n\n"], [20, "\n\nside\n\n"], [21, "\n\nnote\n\n"]], stdout);
 });
 
+test("a stepped column boundary lets each band choose its own cut", async () => {
+  const python = await detectPdfLayoutExtractor();
+  const script = `import json, sys
+from pdfReadingOrder import column_flow
+chars = []
+def band(top, left_end, right_start, right_end):
+    for x in range(40, left_end, 6):
+        chars.append({"text": "b", "x0": float(x), "x1": float(x + 5), "top": float(top), "bottom": float(top + 7)})
+    for x in range(right_start, right_end, 6):
+        chars.append({"text": "c", "x0": float(x), "x1": float(x + 5), "top": float(top), "bottom": float(top + 7)})
+for row in range(6):
+    band(60 + row * 18, 244, 300, 420)
+for row in range(6):
+    band(300 + row * 18, 180, 200, 280)
+flow = column_flow(chars, 400.0, 600.0, (0.0, 0.0), ())
+print(json.dumps({"strategy": flow["strategy"],
+                  "zones": [[z["top"], z["bottom"], z["cut"]] for z in flow["zones"]]}))
+`;
+  const { stdout } = await promisify(execFile)(python.command,
+    [...python.args, "-c", `import sys; sys.path.insert(0, sys.argv[1]);\n${script}`, path.resolve("src/adapters")], { windowsHide: true });
+  const flow = JSON.parse(stdout.trim().split("\n").pop());
+  assert.equal(flow.strategy, "segmented_columns", stdout);
+  assert.deepEqual(flow.zones, [[0, 157, 271.5], [157, 600, 191.5]], stdout);
+});
+
 test("margin notes on either side and a body-size side column stay out of the prose", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sidebar-page-"));
   try {

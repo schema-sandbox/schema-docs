@@ -4,6 +4,12 @@ Full-width blocks separate independently ordered column bands. Geometry is
 inspected before synthetic markers are inserted.
 """
 
+# A column separator is a repeatable blank lane. A figure caption set beside a
+# body column leaves a lane narrower than the leading of either, so the cutoff
+# sits below a paragraph's leading: half the lane stays clear on each side.
+COLUMN_GUTTER = 12
+COLUMN_GUTTER_CLEAR = COLUMN_GUTTER / 2
+
 
 def source_table_grid(table, rows):
     """Recover spans only from real cell boundaries, never from empty text.
@@ -69,9 +75,9 @@ def column_flow(chars, width, height, origin=(0, 0), regions=()):
         for index in range(12, len(ordered) - 12):
             left = endpoints[index - 1]
             right = float(ordered[index]["x0"])
-            if right - left >= 18 and origin[0] + width * .25 < (left + right) / 2 < origin[0] + width * .75:
+            if right - left >= COLUMN_GUTTER and origin[0] + width * .25 < (left + right) / 2 < origin[0] + width * .75:
                 candidates.append((left + right) / 2)
-    best = None
+    best, scored = None, {}
     for cut in sorted(set(round(c, 1) for c in candidates)):
         supported, crossing = [], []
         for row in rows:
@@ -80,13 +86,13 @@ def column_flow(chars, width, height, origin=(0, 0), regions=()):
             if not left or not right:
                 continue
             gap = min(float(c["x0"]) for c in right) - max(float(c["x1"]) for c in left)
-            if gap < 18 or any(float(c["x0"]) < cut < float(c["x1"]) for c in row["chars"]):
+            if gap < COLUMN_GUTTER or any(float(c["x0"]) < cut < float(c["x1"]) for c in row["chars"]):
                 crossing.append([min(float(c["top"]) for c in row["chars"]),
                                  max(float(c["bottom"]) for c in row["chars"])])
         for band in bands.values():
-            left = [c for c in band["chars"] if float(c["x1"]) <= cut - 9]
-            right = [c for c in band["chars"] if float(c["x0"]) >= cut + 9]
-            clear = all(float(c["x1"]) <= cut - 9 or float(c["x0"]) >= cut + 9 for c in band["chars"])
+            left = [c for c in band["chars"] if float(c["x1"]) <= cut - COLUMN_GUTTER_CLEAR]
+            right = [c for c in band["chars"] if float(c["x0"]) >= cut + COLUMN_GUTTER_CLEAR]
+            clear = all(float(c["x1"]) <= cut - COLUMN_GUTTER_CLEAR or float(c["x0"]) >= cut + COLUMN_GUTTER_CLEAR for c in band["chars"])
             if clear and len(left) >= 12 and len(right) >= 12:
                 supported.append(band)
         if len(supported) < max(6, len(rows) * .12):
@@ -113,12 +119,53 @@ def column_flow(chars, width, height, origin=(0, 0), regions=()):
         for z in zones:
             if merged and z["cut"] == merged[-1]["cut"]: merged[-1]["bottom"] = z["bottom"]
             else: merged.append(z)
+        scored[cut] = (merged, supported)
         proposal = {"cut": cut, "top": columns[0]["top"], "bottom": columns[-1]["bottom"],
                     "supportingRows": support, "zones": merged,
                     "strategy": "segmented_columns" if len(columns) > 1 else "column_major"}
         if best is None or (support, -abs(cut-origin[0]-width/2)) > (best["supportingRows"], -abs(best["cut"]-origin[0]-width/2)):
             best = proposal
-    return best
+    return _refine_zones(best, scored, band_height) if best else best
+
+
+def _refine_zones(best, scored, band_height):
+    """Let a zone the winning cut could not split take another candidate's cut.
+
+    A stepped column boundary gives a page one cut above a wide caption and a
+    narrower one below it, so no single line clears the whole page and the
+    winner leaves the wide half uncolumned.  Each such zone borrows the cut of
+    the candidate with the most evidence inside it, keeping the winning cut
+    elsewhere; a zone no candidate supports with three bands stays page-wide.
+    """
+    refined = []
+    for zone in best["zones"]:
+        if zone["cut"] is not None:
+            refined.append(zone)
+            continue
+        choice = None
+        for cut, (zones, supported) in scored.items():
+            if cut == best["cut"]: continue
+            span = next((z for z in zones if z["cut"] == cut
+                         and z["top"] < zone["bottom"] and zone["top"] < z["bottom"]), None)
+            if span is None: continue
+            top, bottom = max(zone["top"], span["top"]), min(zone["bottom"], span["bottom"])
+            evidence = [b for b in supported if top <= b["top"] < bottom]
+            if bottom - top < band_height * 3 or len(evidence) < 3: continue
+            if choice is None or len(evidence) > len(choice[1]): choice = (cut, evidence, top, bottom)
+        if choice is None:
+            refined.append(zone)
+            continue
+        cut, _, top, bottom = choice
+        if top > zone["top"]: refined.append({"top": zone["top"], "bottom": top, "cut": None})
+        refined.append({"top": top, "bottom": bottom, "cut": cut})
+        if bottom < zone["bottom"]: refined.append({"top": bottom, "bottom": zone["bottom"], "cut": None})
+    merged = []
+    for zone in refined:
+        if merged and zone["cut"] == merged[-1]["cut"]: merged[-1]["bottom"] = zone["bottom"]
+        else: merged.append(zone)
+    columns = [z for z in merged if z["cut"] is not None]
+    return {**best, "top": columns[0]["top"], "bottom": columns[-1]["bottom"], "zones": merged,
+            "strategy": "segmented_columns" if len(columns) > 1 else "column_major"}
 
 
 def extract_ordered_text(page, flow):
