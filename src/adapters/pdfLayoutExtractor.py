@@ -64,6 +64,18 @@ MATH_FONT = re.compile(
     re.IGNORECASE,
 )
 MATH_SIGNAL = re.compile(r"[=+\-*/^_<>\u00b1\u00d7\u00f7\u2200-\u22ff\u0370-\u03ff]")
+# TeX's mathematical fonts (and their Latin Modern successors) encode
+# mathematical symbols, never precomposed accented letters.  An accented
+# letter arriving from one of them is a producer-written mapping error, so it
+# carries evidence the decoded text is wrong -- the same conclusion as a raw
+# ``(cid:n)`` -- and the region is safer as a source-linked crop.  The text
+# fonts that legitimately supply accents (``LMRoman``, ``SFBMR``, ``HFBR``)
+# are deliberately outside this class.
+TEX_MATH_FONT = re.compile(
+    r"(?:tex-math|lmmath|cmmi|cmsy|cmex|msam|msbm|euler|eusm|rsfs)",
+    re.IGNORECASE,
+)
+LATIN1_LETTER = re.compile(r"[\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u00ff]")
 BROKEN_FORMULA = re.compile(r"(?:\(cid:\d+\)|\\[0-7]{3})")
 FIGURE_CAPTION = re.compile(r"\bFig(?:ure)?\.?\s*\d+(?:\s*(?:[.\-\u2013]\s*)?\d+)+", re.IGNORECASE)
 
@@ -102,6 +114,24 @@ def formula_requires_visual_fallback(source_text, latex=""):
         return True
     if repeated_dash and operator_tokens and len(operands) <= 1:
         return True
+    return False
+
+
+def math_font_latin1_artifact(chars):
+    """True when a precomposed Latin-1 letter arrives from a TeX math font.
+
+    A TeX mathematical font has no precomposed accented letter in its own
+    encoding, so one handed back by its mapping was substituted by a broken
+    producer-written CMap (the cid for ``partial``/``=``/``(`` decoded to
+    ``Ñ``/``“``/``p``).  Trusting that string would publish a confidently
+    wrong equation, so it is treated exactly like a raw ``(cid:n)``.  The
+    same letter from a text font is a genuine accent and is left alone.
+    """
+    for char in chars or []:
+        if not LATIN1_LETTER.search(str(char.get("text", ""))):
+            continue
+        if TEX_MATH_FONT.search(str(char.get("fontname", ""))):
+            return True
     return False
 
 
@@ -1025,7 +1055,7 @@ def formula_regions(page, page_number, excluded_keys=None):
         # carries explicit evidence of semantic damage. In that case a
         # source-linked crop is safer than a plausible but wrong equation.
         display_fragment = centred_fragment or single_centered_number
-        broken = formula_requires_visual_fallback(text)
+        broken = formula_requires_visual_fallback(text) or math_font_latin1_artifact(line_chars)
         display_math_line = not prose_like and is_display_formula_bbox(page.width, bbox)
         regions.append({
             "type": "formula",
@@ -1169,7 +1199,7 @@ def merge_complex_formula_regions(regions, page=None):
             single = group[0]
             compact_text = normalize_line(single.get("text", ""))
             latex = reconstruct_formula_latex([single])
-            semantic_damage = formula_requires_visual_fallback(compact_text, latex)
+            semantic_damage = formula_requires_visual_fallback(compact_text, latex) or math_font_latin1_artifact(single.get("_chars", []))
             standalone_display = standalone_display and has_display_formula_semantics(
                 latex,
                 compact_text,
@@ -1214,7 +1244,9 @@ def merge_complex_formula_regions(regions, page=None):
         merged_bbox = [round(value, 2) for value in union_bbox([entry["bbox"] for entry in group])]
         page_width = float(group[0].get("pageWidth", 612.0))
         latex = reconstruct_formula_latex(group)
-        semantic_damage = formula_requires_visual_fallback(" ".join(source_texts), latex)
+        semantic_damage = formula_requires_visual_fallback(" ".join(source_texts), latex) or any(
+            math_font_latin1_artifact(entry.get("_chars", [])) for entry in group
+        )
         standalone_display = standalone_display and has_display_formula_semantics(
             latex,
             " ".join(source_texts),

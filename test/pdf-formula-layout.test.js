@@ -124,6 +124,23 @@ function requiresVisualFallback(sourceText, latex = "") {
   return result.stdout.trim() === "true";
 }
 
+function mathFontLatin1Artifact(chars) {
+  const script = [
+    "import importlib.util,json,sys",
+    "spec=importlib.util.spec_from_file_location('extractor',sys.argv[1])",
+    "module=importlib.util.module_from_spec(spec)",
+    "spec.loader.exec_module(module)",
+    "print('true' if module.math_font_latin1_artifact(json.loads(sys.argv[2])) else 'false')"
+  ].join(";");
+  const result = spawnSync("python", ["-c", script, extractorPath, JSON.stringify(chars)], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: { ...process.env, PYTHONUTF8: "1", PYTHONDONTWRITEBYTECODE: "1" }
+  });
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout.trim() === "true";
+}
+
 function repairCid(fontname, cid) {
   const script = [
     "import importlib.util,json,sys,types",
@@ -656,6 +673,33 @@ test("plausible but semantically damaged math uses a source visual fallback", ()
     assert.equal(requiresVisualFallback(source, latex), true, `expected visual fallback: ${source}`);
   }
   assert.equal(requiresVisualFallback(String.raw`a\le b`, String.raw`a\le b`), false);
+});
+
+test("a Latin-1 letter from a TeX math font marks the text as damaged", () => {
+  // A TeX math font cannot legitimately produce a precomposed accented
+  // letter, so one arriving there is a broken producer-written CMap: the
+  // region must not stay editable.  The same letter from a text font is a
+  // genuine accent and must not be flagged.
+  const damaged = [
+    [{ text: "Ñ", fontname: "LYKCWK+TeX-matha8" }],
+    [{ text: "=", fontname: "KUKEAY+TeX-matha12" }, { text: "Ý", fontname: "KUKEAY+TeX-matha12" }],
+    [{ text: "δ", fontname: "DZYRPZ+LMMathItalic12-Regular" }, { text: "ñ", fontname: "DZYRPZ+LMMathItalic12-Regular" }],
+    [{ text: "x", fontname: "KUKEAY+TeX-matha12" }, { text: "ô", fontname: "KUKEAY+TeX-matha12" }]
+  ];
+  for (const chars of damaged) {
+    assert.equal(mathFontLatin1Artifact(chars), true, `expected damage: ${JSON.stringify(chars)}`);
+  }
+  const genuine = [
+    [{ text: "ö", fontname: "CNVJHH+LMRoman12-Regular" }],
+    [{ text: "Å", fontname: "IZUYND+HFBR9" }],
+    [{ text: "Ñ", fontname: "QZJCSY+SFBMR9" }],
+    [{ text: "Schrödinger", fontname: "IMIPHY+SFRB1000" }],
+    [{ text: "×", fontname: "KUKEAY+TeX-matha12" }]
+  ];
+  for (const chars of genuine) {
+    assert.equal(mathFontLatin1Artifact(chars), false, `expected acceptance: ${JSON.stringify(chars)}`);
+  }
+  assert.equal(mathFontLatin1Artifact([]), false);
 });
 
 test("space-stripped prose is not promoted to a display equation", () => {
