@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
@@ -7,7 +8,12 @@ import os from "node:os";
 import path from "node:path";
 import { detectPdfOcrAdapter, extractPdfWithOcr } from "../src/adapters/pdfOcrExtractor.js";
 
-test("native OCR region scheduling processes every region in bounded batches", async () => {
+// These cases drive the bundled interpreter directly, so a checkout without the
+// private runtime (CI, a bare clone) can only skip them, not pass them.
+const bundledRuntimeSkip = !existsSync(process.env.SCHEMA_DOCS_PYTHON || path.join(process.cwd(), "runtime", "python", "python.exe"))
+  && "The private bundled PDF runtime is required for this integration test.";
+
+test("native OCR region scheduling processes every region in bounded batches", { skip: bundledRuntimeSkip }, async () => {
   const python = process.env.SCHEMA_DOCS_PYTHON || path.join(process.cwd(), "runtime", "python", "python.exe");
   const script = `import json,sys
 sys.path.insert(0, sys.argv[1])
@@ -24,7 +30,7 @@ print(json.dumps({"requested":result["regionsRequested"],"processed":result["reg
   assert.deepEqual(result, { requested: 37, processed: 37, batches: 5, unresolved: 0 });
 });
 
-test("native OCR does not discard text from a weak histogram signal", async () => {
+test("native OCR does not discard text from a weak histogram signal", { skip: bundledRuntimeSkip }, async () => {
   const python = process.env.SCHEMA_DOCS_PYTHON || path.join(process.cwd(), "runtime", "python", "python.exe");
   const script = `from PIL import Image, ImageDraw
 import sys
@@ -51,7 +57,7 @@ assert result["attempts"], result
   await promisify(execFile)(python, ["-B", "-c", script, path.join(process.cwd(), "src", "adapters")], { windowsHide: true });
 });
 
-test("native OCR records unresolved text inside a preserved visual fallback as visual-only", async () => {
+test("native OCR records unresolved text inside a preserved visual fallback as visual-only", { skip: bundledRuntimeSkip }, async () => {
   const python = process.env.SCHEMA_DOCS_PYTHON || path.join(process.cwd(), "runtime", "python", "python.exe");
   const script = `from PIL import Image, ImageDraw
 import sys
@@ -74,7 +80,7 @@ assert result["reason"] == "visual_fallback_unresolved", result
   await promisify(execFile)(python, ["-B", "-c", script, path.join(process.cwd(), "src", "adapters")], { windowsHide: true });
 });
 
-test("layout excludes raster fragments already covered by a complete figure fallback", async () => {
+test("layout excludes raster fragments already covered by a complete figure fallback", { skip: bundledRuntimeSkip }, async () => {
   const python = process.env.SCHEMA_DOCS_PYTHON || path.join(process.cwd(), "runtime", "python", "python.exe");
   const script = `import sys
 sys.path.insert(0, sys.argv[1])
@@ -93,7 +99,7 @@ assert excluded[0]["reason"] == "visual_fallback", excluded
   await promisify(execFile)(python, ["-B", "-c", script, path.join(process.cwd(), "src", "adapters")], { windowsHide: true });
 });
 
-test("OCR candidate filtering keeps a source disposition ledger", async () => {
+test("OCR candidate filtering keeps a source disposition ledger", { skip: bundledRuntimeSkip }, async () => {
   const python = process.env.SCHEMA_DOCS_PYTHON || path.join(process.cwd(), "runtime", "python", "python.exe");
   const script = `import sys
 sys.path.insert(0, sys.argv[1])

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { promisify } from "node:util";
 import path from "node:path";
 import os from 'node:os';
@@ -13,6 +14,9 @@ import { validatePdfConversion } from "../src/adapters/pdfConversionValidation.j
 
 const python = process.env.SCHEMA_DOCS_PYTHON || path.resolve("runtime/python/python.exe");
 const run = script => promisify(execFile)(python, ["-B", "-X", "utf8", "-c", script, path.resolve("src/adapters")], { windowsHide: true });
+// The cases below drive the bundled interpreter directly, so a checkout without
+// the private runtime (CI, a bare clone) can only skip them, not pass them.
+const bundledRuntimeSkip = !existsSync(python) && "The private bundled PDF runtime is required for this integration test.";
 
 test("OCR metadata markers retain every physical page and failed status", () => {
   const markdown = "# Book\n<!-- pdf-page: 1; extraction: ocr; languages: eng -->\none\n<!-- pdf-page: 2; extraction: ocr_failed; languages: eng; merge: native -->\ntwo";
@@ -78,7 +82,7 @@ test("OCR candidate ledger rejects unknown dispositions", () => {
   assert.equal(result.passed, false);
 });
 
-test("deferred parser opens a saved window after a lightweight first page", async () => {
+test("deferred parser opens a saved window after a lightweight first page", { skip: bundledRuntimeSkip }, async () => {
   await run(`import sys,tempfile,shutil
 from pathlib import Path
 sys.path.insert(0,sys.argv[1])
@@ -102,7 +106,7 @@ with tempfile.TemporaryDirectory() as folder:
 `);
 });
 
-test("complex uncaptioned pages retain a full source image and mutable markers", async () => {
+test("complex uncaptioned pages retain a full source image and mutable markers", { skip: bundledRuntimeSkip }, async () => {
   await run(`import sys,tempfile,ctypes
 from pathlib import Path
 sys.path.insert(0,sys.argv[1])
@@ -130,7 +134,7 @@ with tempfile.TemporaryDirectory() as folder:
 `);
 });
 
-test("OCR commits regions before interruption and reuses only matching results", async () => {
+test("OCR commits regions before interruption and reuses only matching results", { skip: bundledRuntimeSkip }, async () => {
   await run(`import sys
 sys.path.insert(0,sys.argv[1])
 import pdfRegionOcr as r
@@ -154,7 +158,7 @@ assert result['text']=='\\n\\n'.join(str(i) for i in range(37))
 `);
 });
 
-test('failed empty page caches retry and preserve the failed-page count', async () => {
+test('failed empty page caches retry and preserve the failed-page count', { skip: bundledRuntimeSkip }, async () => {
   await run(`import sys,tempfile,json
 from pathlib import Path
 sys.path.insert(0,sys.argv[1])
@@ -181,14 +185,14 @@ with tempfile.TemporaryDirectory() as temp:
 `);
 });
 
-test('explicit worker memory and task deadlines remain classified interruptions', async () => {
+test('explicit worker memory and task deadlines remain classified interruptions', { skip: bundledRuntimeSkip }, async () => {
   const args=['-B','-c', "import sys,time;sys.path.insert(0,sys.argv[1]);from pdfResources import ResourceMonitor\nwith ResourceMonitor(max_resident_bytes=1): time.sleep(10)",path.resolve('src/adapters')];
   await assert.rejects(runLayoutProcess({command:python},args), {code:'resource_limit'});
   await assert.rejects(runLayoutProcess({command:process.execPath},['-e','setInterval(()=>{},1000)'],{timeout:100}), {code:'TIMEOUT'});
   await assert.rejects(runLayoutProcess({command:process.execPath},['-e','setInterval(()=>{},1000)'],{maxResidentBytes:1}), {code:'resource_limit'});
 });
 
-test('lightweight source preservation follows rotated crop coordinates', async () => {
+test('lightweight source preservation follows rotated crop coordinates', { skip: bundledRuntimeSkip }, async () => {
   await run(`import sys,tempfile,ctypes
 from pathlib import Path
 sys.path.insert(0,sys.argv[1])
@@ -230,7 +234,7 @@ test('interrupted parser scratch includes and removes its window files', async (
   }
 });
 
-test('region journals survive a discarded page aggregate and resume only unfinished regions', async () => {
+test('region journals survive a discarded page aggregate and resume only unfinished regions', { skip: bundledRuntimeSkip }, async () => {
   await run(`import sys,tempfile,json
 from pathlib import Path
 sys.path.insert(0,sys.argv[1])

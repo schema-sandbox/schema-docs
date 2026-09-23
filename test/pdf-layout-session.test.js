@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -8,6 +9,9 @@ import { extractPdfWithLayout, runLayoutProcess } from "../src/adapters/pdfLayou
 import { markdownToPdfBuffer } from "../src/adapters/pdfMarkdownConverter.js";
 
 const testPython = process.env.SCHEMA_DOCS_PYTHON || path.resolve("runtime/python/python.exe");
+// The bundled interpreter is private to a release checkout, so a machine without
+// it (CI, a bare clone) can only skip these integration tests, not pass them.
+const bundledRuntimeSkip = !existsSync(testPython) && "The private bundled PDF runtime is required for this integration test.";
 
 test("real parser reuses verified page windows and recomputes damaged or changed source pages", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "layout-resume-"));
@@ -54,7 +58,7 @@ test("layout cancellation kills the running child before the adapter rejects", a
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("unknown glyph fallback preserves neighbours and cached assets must verify", () => {
+test("unknown glyph fallback preserves neighbours and cached assets must verify", { skip: bundledRuntimeSkip }, () => {
   const script = `
 import sys, tempfile, types, pathlib, json, hashlib
 sys.path.insert(0, sys.argv[1])
@@ -87,7 +91,7 @@ with tempfile.TemporaryDirectory() as temp:
   assert.match(result.stdout, /ok/);
 });
 
-test("detached decoded math symbols use a visual fallback instead of corrupting prose", () => {
+test("detached decoded math symbols use a visual fallback instead of corrupting prose", { skip: bundledRuntimeSkip }, () => {
   const script = `
 import sys, types
 sys.path.insert(0, sys.argv[1])
@@ -112,7 +116,7 @@ print('ok')
   assert.match(result.stdout, /ok/);
 });
 
-test("duplicate detached symbols share one visual fallback asset", () => {
+test("duplicate detached symbols share one visual fallback asset", { skip: bundledRuntimeSkip }, () => {
   const script = `
 import sys, types
 sys.path.insert(0, sys.argv[1])
@@ -142,7 +146,7 @@ print('ok')
   assert.match(result.stdout, /ok/);
 });
 
-test("mixed PDF windows reopen the requested ordinary page after a single-page isolation", () => {
+test("mixed PDF windows reopen the requested ordinary page after a single-page isolation", { skip: bundledRuntimeSkip }, () => {
   const script = `
 import pathlib, sys, tempfile, types
 sys.path.insert(0, sys.argv[1])
