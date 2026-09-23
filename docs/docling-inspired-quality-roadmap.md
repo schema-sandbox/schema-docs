@@ -871,3 +871,48 @@ cf. 1962A third body sentence closes it here.
 **明确记录、本轮不做的边界。** (1) 「仅空白差异」这一类是判据对齐的副产物：行尾连字符后面不是小写字母（大写开头、数字、控制字符）时，旧实现插空格，现在不插——源文本来就是紧挨着的。 (2) 词表建在「这条路径读到的全部文本行」上，不含布局信息；文档文本层本身乱码时（arxiv、unit-distance、Math4Kids），词表也是乱码，判据照旧执行但不保证正确。 (3) 三本大书仍进不了这条路径（解压上限 256 MB），所以代价与收益只能在上述五份材料上度量。 (4) 空白压缩 `.replace(/\s+/g, " ")` 保持原样，未并入本轮。
 
 **证据位置。** `.ai-doc-exchange/crosspage-probe/`：`hyphen-textlayer.mjs`（A/B，含跨文档词表判定与逐行窗口）、`hyphen-split.mjs`（把变化行分成「保留连字符」与「仅空白差异」）、`hyphen-spaceonly.mjs`（只列空白差异类，供逐行定性）、`byte-hygiene.py`（软连字符字面量、CR、BOM 的字节卫生检查），均为可重跑小脚本。
+
+## §37 跨页连接器并入同一判据：三台连接器判据收齐，真实材料上零实例（2026-09-23）
+
+**背景与结论。** §36 边界记下的是最后一台连接器：`src/core/readableMarkdown.js` 的 `reflowPdfParagraphs`（跨页段落接续，Document IR 与 `documents.js` 的接续决策都走它）仍按 `[A-Za-z]{3,}` 建词表、按 `(?:^|\s)([A-Za-z]{2,})[-\u00ad]$` 取片段、按 `^([a-z]+)\b` 取后半词。本轮把它并到同一条判据上；三台连接器（Python 的 `join_prose_line`（页内、跨页共用）、JS 内置文本层的 `joinPdfParagraphLines`、JS 跨页的 `reflowPdfParagraphs`）现在逐字同源。与 §36 不同，这一项在真实材料上**测不到收益**：9 个窗口、1,028 页，新旧两侧产出完全一致——0 行变化、0 次连字符拼合，连 `ambiguous_hyphen` 决策数都不变——因为在这批语料里，正文在页面边界处断词近乎不存在。换来的是一致性与一处潜在取词错误，不是行为改善。
+
+**规则。** 与另两处逐条对应：进入条件是末行以 `-` 或 U+00AD 结尾、且前一个字符是字母或数字（`[\p{L}\p{N}][-\u00ad]$`）；片段取连字符前 2 个以上字母（`(\p{L}{2,})`，对应 Python 的 `[^\W\d_]{2,}`）；后半词取页面开头的整段字母串（`^(\p{L}+)`，不再是 `^([a-z]+)\b`）；只有后半词首为小写（`^\p{Ll}`）且有证据——软连字符，或「片段+后半词」出现在文内词表——才丢掉连字符拼合。词表由 `\p{L}{3,}` 在整份 `markdown` 上建一次，对应 `DOCUMENT_WORD = [^\W\d_]{3,}`。没有证据就不拼合（`naturalTail` 不成立），本函数不产出这一处的跨页拼合，行尾连字符原样留在源文本里。`evidence` 一栏原本读 `split[2] === "\u00ad"`，片段改为 `(\p{L}{2,})` 后该组不存在，一并改为 `softTail`，否则软连字符会被记成 `independent_source_word`。
+
+**顺手修掉的一处取词错误（潜在，本批语料里不可见）。** 旧口径有两处 ASCII 化：词表 `[A-Za-z]{3,}` 把 `café` 取成 `caf`；后半词 `^([a-z]+)\b` 对以重音小写字母开头的词头直接不匹配（`é` 不是 `[a-z]`），于是「`caf-` + `é…`」这类真断词根本进不了证据判定，既不拼合也不记 `ambiguous`。两者对纯 ASCII 正文等价，对带重音的语言会漏拼。另有一处数值尾巴：`1-` 取不出片段（`(\p{L}{2,})` 不匹配），因此不构成证据，与 §36 在另两台连接器上堵的洞同一形状。
+
+**测量（9 窗口 A/B，真实材料）。** 探针 `crosspage-align.mjs` 一次抽页，把同一份 `(markdown, visualMap)` 分别喂给本 worktree 与 HEAD worktree 的 `reflowPdfParagraphs`（`node crosspage-align.mjs <head-worktree> [out.json] [labels]`）：
+
+| 窗口 | 页 | markdown 行 | 旧接续 | 新接续 | 旧连字符拼合 | 新连字符拼合 | 旧 ambiguous | 新 ambiguous | 变化行 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Campbell 40+220 | 220 | 13,640 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| Campbell 96+8 | 8 | 897 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| Immunology 60+120 | 120 | 6,945 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| Ecology 80+120 | 120 | 937 | 17 | 17 | 0 | 0 | 0 | 0 | 0 |
+| arXiv 1512.06808 33+120 | 120 | 3,752 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| math-deep 1+120 | 120 | 4,523 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| Math4Kids 1+120 | 120 | 1,085 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| unit-distance 20+80 | 80 | 4,777 | 2 | 2 | 0 | 0 | 1 | 1 | 0 |
+| Feynman 60+120 | 120 | 1,965 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 合计 | 1,028 | 38,521 | 19 | 19 | 0 | 0 | 1 | 1 | 0 |
+
+跨页接续本身两侧都被接受 19 次（Ecology 17、unit-distance 2），但 **`joinKind` 无一为 `hyphenated_word`**：这些边界上的接续都是「上一页末行不以连字符结尾」的普通续行。0 行变化意味着新旧实现在这批材料上给出逐字节相同的 markdown；各窗口前后行数一致（`lineCountStable` 全为 true）。
+
+**边界处的连字符人口（直接点名，不看聚合）。** 聚合数会被家具骗：这批书里 `pdfPageFlowContext` 的 `a.last` 有时指向页脚（Campbell 是 `11/6/19 5:34 AM`），据此统计会得出「1,008 页只有 1 个边界」的假结论（探针第一版正是如此，上表 `boundaries` 一列因此全为 0/1）。改按连接器自己的口径解析末行（`paragraphEdges.last`，页带家具时回退 `trailing`/`leading`）逐边界点名（`edge-tails.mjs`）：
+
+| 窗口 | 边界 | 解析出末行 | 末行以连字符结尾 |
+| --- | --- | --- | --- |
+| Ecology 80+120 | 117 | 115 | 0 |
+| Campbell 96+8 | 7 | 6 | 0 |
+| Immunology 60+120 | 119 | 87 | 0 |
+| arXiv 1512.06808 33+120 | 119 | 94 | 0 |
+| 合计 | 362 | 302 | 0 |
+
+同一窗口里行尾连字符并不罕见——Campbell 那 8 页有 11 条——但全部落在页内：它们的下一行是空行、`$$`、下标行或另一段化学记号，没有一条紧贴页边界。这是这批材料的事实（正文排版尽量不在页边断行），不是所有 PDF 的事实。
+
+**为什么值得换（在零实例下）。** 三条：一是判据只剩一处定义，三台连接器不再各持一套正则，后续改动不会再只改到两台；二是潜在取词错误消失（重音语言不再漏拼、数值尾巴不再误判），这类错误在纯 ASCII 正文上不发作，只有在法语/西班牙语等正文上才会露出，属于「不测就不会知道」的一类；三是词表与另两处同源后，`sourceWords` 的建表口径与 `documentWordSet`、`document_words` 对齐，便于以后合并成一个模块。
+
+**回归件。** `test/pdf-page-flow.test.js` 新增「cross-page hyphen joins read the document's own words whatever alphabet they use」：文内先出现 `The café directory lists every colleague.`（词表证据），于是 `caf-` + `é directory …` 拼合成 `café`，并断言 `joinKind` 为 `hyphenated_word`、`evidence` 为 `independent_source_word`（软连字符那条路径的记账一并锁住）；同一条用例里 `1-` + `year` 不拼合、不出现 `1year`。该用例在 HEAD worktree 上运行**失败**（已验证），改动后通过。
+
+**明确记录、本轮不做的边界。** (1) 零实例的语料无法区分新旧：这里能说的是「没测到差别」，不是「被证明无回归」；判据差别本身的证据来自回归件，不是真实材料。 (2) 被保留的行尾连字符在后续段落整理里会不会被插空格接上（`hyphen-spaced` 一类），9 个窗口里计数为 0，本轮未动，也未被语料覆盖。 (3) 边界解析依赖 `paragraphEdges` 与家具判定，页脚被当成末行的材料必须先按连接器口径解析，否则统计无效（见上）。 (4) 词表仍取自 `markdown` 全文——跨页连接器拿到的是已构建的 markdown——不含布局信息；文档文本层乱码时词表同样乱码。
+
+**证据位置。** `.ai-doc-exchange/crosspage-probe/`：`crosspage-align.mjs`（9 窗口 A/B，含跨文档拼合形判定）、`edge-tails.mjs`（按连接器口径点名边界末行）、`boundary-sanity.mjs`（行尾连字符的全量与页边界对照）、`hyphen-lines.mjs`（列出窗口内每条行尾连字符及其下一行）、`byte-hygiene.py`（字节卫生检查），均可重跑。

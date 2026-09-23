@@ -404,6 +404,40 @@ test("cross-page Chinese prose joins without an inserted space and hyphenated La
   assert.doesNotMatch(result.markdown, /inter- national/);
 });
 
+test("cross-page hyphen joins read the document's own words whatever alphabet they use", () => {
+  const accentedTail = "The résumé review reaches the page edge and the caf-";
+  const accentedHead = "é directory lists every colleague who joined this year.";
+  const numericTail = "The lease summary reaches the page edge and the term of 1-";
+  const numericHead = "year applies to every tenant named in the agreement.";
+  const page = (number, first, last) => ({
+    page: number, width: 600, height: 800, coordinateOrigin: [0, 0],
+    paragraphEdges: {
+      first: { text: first, bbox: [40, 60, 540, 110], fontSize: 11 },
+      last: { text: last, bbox: [40, 720, 540, 780], fontSize: 11 }
+    }
+  });
+  const markdown = [
+    "<!-- pdf-page: 1 -->", "The café directory lists every colleague.",
+    "<!-- pdf-page: 2 -->", accentedTail, "<!-- pdf-page: 3 -->", accentedHead,
+    "<!-- pdf-page: 4 -->", numericTail, "<!-- pdf-page: 5 -->", numericHead
+  ].join("\n");
+  const map = { pages: [
+    page(1, "The café directory lists every colleague.", "The café directory lists every colleague."),
+    page(2, accentedTail, accentedTail), page(3, accentedHead, accentedHead),
+    page(4, numericTail, numericTail), page(5, numericHead, numericHead)
+  ] };
+  const result = reflowPdfParagraphs(markdown, map);
+  // The document spells "café" out, so that break is a break even though the
+  // head run is a single accented letter and the vocabulary word is not ASCII.
+  assert.ok(result.markdown.includes("and the café directory lists every colleague"), result.markdown);
+  assert.equal(result.links[0].joinKind, "hyphenated_word");
+  assert.deepEqual(result.links[0].evidence, ["independent_source_word"]);
+  // A hyphen with no fragment before it has nothing to look up: the "year" the
+  // document spells out is no evidence that "1-" was a break, so the two lines
+  // stay apart rather than fusing into "1year".
+  assert.doesNotMatch(result.markdown, /1year/, result.markdown);
+});
+
 test("a line-end hyphen follows the document's own words instead of a blanket rule", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hyphen-join-"));
   try {

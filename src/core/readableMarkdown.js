@@ -297,7 +297,7 @@ return ["## Contents", "", ...headings, ""];
 export function reflowPdfParagraphs(markdown, visualMap) {
   const {lines,pages,byNumber,ignored,furniture} = pdfPageFlowContext(markdown,visualMap);
   const links=[], decisions=[], roots=new Map(), replacements=new Map(), removed=new Set(ignored);
-  const sourceWords = new Set(String(markdown).match(/[A-Za-z]{3,}/g)?.map(word=>word.toLowerCase()) || []);
+  const sourceWords = new Set(String(markdown).toLowerCase().match(/\p{L}{3,}/gu) ?? []);
   for(let i=1;i<pages.length;i++) {
     const a=pages[i-1],b=pages[i],left=byNumber.get(a.number),right=byNumber.get(b.number);
     const edge = (meta,page,side) => {
@@ -313,10 +313,17 @@ export function reflowPdfParagraphs(markdown, visualMap) {
     const cjkTail=/[\u3400-\u9fff]$/u.test(t), cjkHead=/^[\u3400-\u9fff]/u.test(h);
     // A discretionary hyphen or an independently occurring full word supplies
     // evidence. Letter casing alone cannot distinguish evidence-based from a split word.
-    const split = /(?:^|\s)([A-Za-z]{2,})([-\u00ad])$/.exec(t);
-    const following = /^([a-z]+)\b/.exec(h);
-    const hyphenJoin = Boolean(split && following && (split[2] === "\u00ad"
-      || sourceWords.has((split[1]+following[1]).toLowerCase())));
+    // This is the same criterion over the same whole-document vocabulary as
+    // `joinPdfParagraphLines` here and `join_prose_line` in pdfLayoutExtractor.py:
+    // the fragment is the letter run before the hyphen, the head is the letter run
+    // the next page opens with, and a head that does not start lowercase is no
+    // evidence. A hyphen with fewer than two letters before it spells no fragment,
+    // so a numeric tail like `1-` is left alone rather than fused into `1year`.
+    const softTail = t.endsWith("\u00ad");
+    const split = /[\p{L}\p{N}][-\u00ad]$/u.test(t) ? /(\p{L}{2,})[-\u00ad]$/u.exec(t) : null;
+    const following = /^(\p{L}+)/u.exec(h);
+    const hyphenJoin = Boolean(split && following && /^\p{Ll}/u.test(following[1])
+      && (softTail || sourceWords.has((split[1]+following[1]).toLowerCase())));
     if (split && following && !hyphenJoin) decisions.push({status:"candidate",reason:"ambiguous_hyphen",fromPage:a.number,toPage:b.number,
       sourceRefs:[{kind:"pdf",pageNumber:a.number,lineNumber:a.last+1,bbox:tail.bbox},{kind:"pdf",pageNumber:b.number,lineNumber:b.first+1,bbox:head.bbox}]});
     const naturalHead=/^\p{Ll}/u.test(h) || cjkHead;
@@ -338,7 +345,7 @@ export function reflowPdfParagraphs(markdown, visualMap) {
     replacements.set(root,joined);
     roots.set(b.first,root);removed.add(b.first);
     links.push({fromPage:a.number,toPage:b.number,fromLine:a.last+1,toLine:b.first+1,confidence:"medium",status:"accepted",joinKind,
-      evidence:hyphenJoin ? [split[2] === "\u00ad" ? "source_soft_hyphen" : "independent_source_word"] : ["aligned_body_edges","compatible_font","open_sentence"],
+      evidence:hyphenJoin ? [softTail ? "source_soft_hyphen" : "independent_source_word"] : ["aligned_body_edges","compatible_font","open_sentence"],
       sourceRefs:[{kind:"pdf",pageNumber:a.number,bbox:tail.bbox},{kind:"pdf",pageNumber:b.number,bbox:head.bbox}]});
   }
   return {markdown:lines.map((line,i)=>removed.has(i)?"":replacements.get(i) ?? line).join("\n"),links,decisions:[...decisions,...links],furniture};
