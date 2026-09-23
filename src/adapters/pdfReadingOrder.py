@@ -219,19 +219,97 @@ def paragraph_edges(page, flow):
             "lines": [edge(line) for line in lines]}
 
 
+def body_span(page, body_size):
+    """Horizontal extent of the body-size text, as the run holding the median char.
+
+    Characters merge into runs wherever no gutter of ``GUTTER`` points separates
+    them, so a page split into columns keeps one run per column and the body is
+    the run the median character falls in.  Measuring only body-size characters
+    keeps a smaller margin note from widening the body it sits beside.
+    """
+    GUTTER = 12
+    spans = sorted((float(c["x0"]), float(c["x1"])) for c in page.chars
+                   if str(c.get("text", "")).strip() and float(c.get("size", body_size)) >= body_size*.85)
+    if not spans: return None
+    run, runs = list(spans[0]), []
+    runs.append(run)
+    for x0, x1 in spans[1:]:
+        if x0 - run[1] >= GUTTER: run = [x0, x1]; runs.append(run)
+        else: run[1] = max(run[1], x1)
+    centre = spans[len(spans)//2]
+    return next((r for r in runs if r[0] <= (centre[0]+centre[1])/2 <= r[1]), None)
+
+
+def margin_lines(page, body_size, span):
+    """Whole small-font lines lying beside the body column, not inside it.
+
+    The line is judged as a unit: a small-font line crossing the body span is
+    body text carrying a small fragment, and splitting it at the span's edge
+    would cut a single line into pieces.  Small text wholly inside the span is
+    left in place, because geometry cannot tell a superscript from a margin
+    label sitting in the same column.
+    """
+    small = sorted((c for c in page.chars if str(c.get("text", "")).strip()
+                    and float(c.get("size", body_size)) < body_size*.85),
+                   key=lambda c: float(c["top"]))
+    lines, boxes = [], []
+    for char in small:
+        if lines and abs(float(char["top"]) - float(lines[-1][0])) <= 3: lines[-1][1].append(char)
+        else: lines.append((float(char["top"]), [char]))
+    for _, chars in lines:
+        x0, x1 = min(float(c["x0"]) for c in chars), max(float(c["x1"]) for c in chars)
+        if x1-x0 < page.width*.3 and (x1 <= span[0]-1 or x0 >= span[1]+1):
+            boxes.append([x0, min(float(c["top"]) for c in chars),
+                          x1, max(float(c["bottom"]) for c in chars)])
+    return boxes
+
+
+def _isolate_text(page, bbox):
+    x0, top, x1, bottom = bbox
+    chars = [c for c in page.chars if x0-.1 <= c['x0'] and c['x1'] <= x1+.1 and top-.1 <= c['top'] and c['bottom'] <= bottom+.1]
+    if not chars: return
+    chars.sort(key=lambda c: c['x0'])
+    chars[0]['text'] = '\n\n' + chars[0]['text']
+    chars[-1]['text'] += '\n\n'
+
+
 def isolate_sidebars(page, edges):
-    """Separate small side text sharing a body baseline before text serialization."""
+    """Separate side text from the body block before text serialization.
+
+    Three shapes, none of which removes or reorders a body word: a small-font
+    line in the page's right margin, a small-font line lying entirely left of
+    the body column, and a narrow body-size side band clear of the body block.
+    The two left-hand shapes are keyed to the body column's own extent, so a
+    small line inside the column -- a superscript, a label under a symbol -- is
+    never split out of the prose.  A body-size band sharing the body's vertical
+    extent cannot be told from the column of a split page, so it is left to
+    ``column_flow``, and taken only while it is the minority of the lines.
+    """
     import statistics
     lines=(edges or {}).get('lines',[])
     body_size=statistics.median(item['fontSize'] for item in lines) if lines else 0
-    for item in lines:
-        x0,top,x1,bottom=item['bbox']
-        if not (body_size and item['fontSize']<body_size*.85 and x0-page.bbox[0]>page.width*.6 and x1-x0<page.width*.3): continue
-        chars=[c for c in page.chars if x0-.1<=c['x0'] and c['x1']<=x1+.1 and top-.1<=c['top'] and c['bottom']<=bottom+.1]
-        if not chars: continue
-        chars.sort(key=lambda c:c['x0'])
-        chars[0]['text']='\n\n'+chars[0]['text']
-        chars[-1]['text']+='\n\n'
+    span = body_span(page, body_size) if body_size else None
+    # Side text is only meaningful beside a body *block*; on a one- or two-line
+    # page the run holding the median character is that line itself, and
+    # anything beyond it would look like a margin.
+    if span is None or len(lines) < 3: return
+    band = [item for item in lines
+            if item['fontSize'] >= body_size*.85
+            and (item['bbox'][2] <= span[0]-12 or item['bbox'][0] >= span[1]+12)
+            and item['bbox'][2]-item['bbox'][0] < page.width*.35]
+    block = [item for item in lines if item['bbox'][0] < span[1] and item['bbox'][2] > span[0]]
+    if block:
+        top = min(item['bbox'][1] for item in block)
+        bottom = max(item['bbox'][3] for item in block)
+        band = [item for item in band if item['bbox'][3] <= top-3 or item['bbox'][1] >= bottom+3]
+    chosen = [item['bbox'] for item in lines
+              if item['fontSize'] < body_size*.85 and item['bbox'][2]-item['bbox'][0] < page.width*.3
+              and item['bbox'][0]-page.bbox[0] > page.width*.6]
+    extra = margin_lines(page, body_size, span) + [item['bbox'] for item in band if len(band)*3 <= len(lines)]
+    # A right-margin note qualifies twice; bracket each box once.
+    chosen += [box for box in extra
+               if not any(b[0] <= box[2] and box[0] <= b[2] and b[1] <= box[3] and box[1] <= b[3] for b in chosen)]
+    for box in chosen: _isolate_text(page, box)
 
 
 def separate_margin_lines(text, edges):

@@ -404,6 +404,83 @@ test("cross-page Chinese prose joins without an inserted space and hyphenated La
   assert.doesNotMatch(result.markdown, /inter- national/);
 });
 
+test("sidebar isolation brackets side text and never edits a body character", async () => {
+  const python = await detectPdfLayoutExtractor();
+  const script = `import json, sys, types
+from pdfReadingOrder import isolate_sidebars
+def char(text, size, x0, x1, top):
+    return {"text": text, "size": size, "x0": x0, "x1": x1, "top": top, "bottom": top + size, "fontname": "Helvetica"}
+chars = []
+for i, top in enumerate((100.0, 130.0, 160.0)):
+    for k in range(6):
+        chars.append(char("body", 11, 40 + k * 35, 70 + k * 35, top))
+chars.append(char("cf", 7.5, 8, 28, 145))          # left note, its own baseline
+chars.append(char("see", 7.5, 410, 435, 105))      # right note, beside a body line
+chars.append(char("side", 11, 352, 400, 40))       # body-size side band, clear of the block
+chars.append(char("note", 11, 352, 400, 60))
+page = types.SimpleNamespace(chars=chars, width=500.0, height=620.0, bbox=(0.0, 0.0, 500.0, 620.0))
+lines = [{"text": "body", "bbox": [40.0, top, 245.0, top + 11.0], "fontSize": 11.0}
+         for top in (100.0, 130.0, 160.0)]
+lines += [{"text": "see", "bbox": [410.0, 105.0, 435.0, 112.5], "fontSize": 7.5},
+          {"text": "cf", "bbox": [8.0, 145.0, 28.0, 152.5], "fontSize": 7.5},
+          {"text": "side", "bbox": [352.0, 40.0, 400.0, 51.0], "fontSize": 11.0},
+          {"text": "note", "bbox": [352.0, 60.0, 400.0, 71.0], "fontSize": 11.0}]
+isolate_sidebars(page, {"lines": lines})
+touched = [[i, c["text"]] for i, c in enumerate(chars) if c["text"] != "body"]
+print(json.dumps(touched))
+`;
+  const { stdout } = await promisify(execFile)(python.command,
+    [...python.args, "-c", `import sys; sys.path.insert(0, sys.argv[1]);\n${script}`, path.resolve("src/adapters")], { windowsHide: true });
+  assert.deepEqual(JSON.parse(stdout.trim().split("\n").pop()),
+    [[18, "\n\ncf\n\n"], [19, "\n\nsee\n\n"], [20, "\n\nside\n\n"], [21, "\n\nnote\n\n"]], stdout);
+});
+
+test("margin notes on either side and a body-size side column stay out of the prose", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sidebar-page-"));
+  try {
+    const source = path.join(root, "sidebar.pdf");
+    const python = await detectPdfLayoutExtractor();
+    const script = `import sys, ctypes as c
+import pypdfium2 as p
+import pypdfium2.raw as r
+doc = p.PdfDocument.new(); page = doc.new_page(500, 620)
+def text(font, size, x, y, value):
+    obj = r.FPDFPageObj_NewTextObj(doc, font, size)
+    data = value.encode('utf-16-le') + b'\\0\\0'
+    r.FPDFText_SetText(obj, (c.c_ushort * (len(data) // 2)).from_buffer_copy(data))
+    r.FPDFPageObj_Transform(obj, 1, 0, 0, 1, x, y); page.insert_obj(p.PdfObject(obj))
+for y, line in [(520, 'The main column carries the argument.'),
+                (500, 'A second body sentence continues the'),
+                (480, 'A third body sentence closes it here.')]:
+    text(b'Helvetica', 11, 40, y, line)
+text(b'Helvetica', 11, 352, 600, 'Sidebar line one')
+text(b'Helvetica', 11, 352, 580, 'Sidebar line two')
+text(b'Helvetica', 7.5, 410, 500, 'see chapter 4')
+text(b'Helvetica', 7.5, 8, 480, 'cf. 1962')
+page.gen_content(); doc.save(sys.argv[1]); page.close(); doc.close()
+`;
+    await promisify(execFile)(python.command, [...python.args, "-c", script, source], { windowsHide: true });
+    const result = await extractPdfWithLayout(source, {
+      assetDir: path.join(root, "assets"), cacheDir: path.join(root, "cache")
+    });
+    const md = result.markdown;
+    for (const sentence of ["The main column carries the argument.", "A second body sentence continues the",
+      "A third body sentence closes it here."]) {
+      assert.equal(md.split(sentence).length - 1, 1, md);
+      assert.match(md, new RegExp(`^${sentence.replace(".", "\\.")}$`, "m"), md);
+    }
+    for (const note of ["Sidebar line one", "Sidebar line two", "see chapter 4", "cf. 1962"]) {
+      assert.match(md, new RegExp(`^${note}$`, "m"), md);
+    }
+    assert.doesNotMatch(md, /cf\. 1962A third/, md);
+    if (hasBundledPdfRuntime()) {
+      const automatic = await runPdfExtractionPipeline(source);
+      assert.equal(automatic.extractorName, "pdfplumber");
+      assert.equal(automatic.markdown, md);
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("one physical page keeps real prose, a display formula and a ruled table separate", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "combined-page-"));
   try {
