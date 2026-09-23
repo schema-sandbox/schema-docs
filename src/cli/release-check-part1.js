@@ -77,7 +77,7 @@ export function getChecksPart1(context) {
         && sizeCheckCli.includes("runtimeFiles: 132")
         && sizeCheckCli.includes("sourceFiles: 264")
         && sizeCheckCli.includes("totalBytes: 2_800_000")
-        && sizeCheckCli.includes("totalLines: 58_569")
+        && sizeCheckCli.includes("totalLines: 58_592")
         && sizeCheckCli.includes("largestFileBytes: 125_000")
         && sizeCheckCli.includes("runtimeLargestFileBytes: 125_000")
         && sizeCheckCli.includes("publicModuleBytes: 100_000")

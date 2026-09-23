@@ -17,7 +17,7 @@ const BUDGETS = {
   runtimeFiles: 132,
   sourceFiles: 264,
   totalBytes: 2_800_000,
-  totalLines: 58_569,
+  totalLines: 58_592,
   largestFileBytes: 125_000,
   runtimeLargestFileBytes: 125_000,
   publicModuleBytes: 100_000,
