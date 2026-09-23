@@ -657,3 +657,19 @@ Q05 改动已重新打包为 NSIS/MSI 内部候选。暂存源码、私有转换
 只读复现件：`.ai-doc-exchange/audits/2026-09-23-upgrade-result-audit/combined-fixture.py`。
 
 **门禁与回归。** 全量 568 项：567 通过、0 失败、1 跳过（Windows 平台权限）。体积、语言边界、发布自动检查、私有转换运行时校验四项门禁通过。
+
+## 28. 全量材料复核：质量缺口指标一度失去指标对象（2026-09-23）
+
+**本轮全量结果。** 用 `.ai-doc-exchange/real-material-2026-09-23/real-material-results.json`（12/12 记录，0 错误、0 超时、0 资源受限，总墙钟 8908s，上次 8374s）。
+
+**先决问题：两次运行不是同一个构建，不能直接比。** 上一条记录用的基线是 `final-r4-full.json`（runId `final-cold-20260922-r5`），它的 `runtimeIdentity` 里 10 个受控文件哈希全部与当前不同，且受控文件集合本身也不同（基线没有 `config/*.json`、`package.json`，当前没有 `clean-real-material-test.js`、`prepare-release.js`）。基线 evaluator 的 blob 无法在提交历史里解析，说明它跑在尚未提交的工作树状态上；它的 `summary` 也缺少 `inspected`/`validationFailures`/`backendFailures`，而这三个字段在 2026-09-23 03:10 的 `7646119` 就已存在。即基线早于本仓库累计提交的"文档 IR + 原生 OCR 管线"那一批（`c068405` 等）。
+
+**"质量缺口 8 → 1"是指标假象。** 新构建把原先计入 `pendingOcrPages` 的页面改记为 `ocrReviewPages` / `ocrReviewRegions`（布局层据此给出 `disposition: queued_visual_review`），而评测器 `qualityGap` 只判 `pendingOcrPages`，于是同一批页面不再触发缺口。以 1512.06808v1 为例：`ocrPages` 前后都是 1，`pendingOcrPages` 由 4 变 0，同时新出现 `ocrReviewPages: 4`、`ocrReviewRegions: 7` —— 是同一批区域换了名目，不是真的被处理掉。产品自身的门禁并没有放松：`qualityReport.js:176` 的 AI 发送门禁与 `documents.js:194` 都把 `reviewPages`/`ocrReviewRegions` 计为拦截项，产品对这类文档给出的 `qualityState` 是 `review_required`。只有评测器漏判。
+
+**修复。** 把 `qualityGap` 判定抽为导出的纯函数 `deriveRealMaterialQualityGap`（`src/cli/quality-real-material-evaluate.js`），并把 `reviewPages`、`ocrReviewRegions` 纳入判定，使其与产品门禁同口径；这是把指标重新指向被改名的桶，不是新增策略。用本轮回合的产物离线重算：缺口为 7，另加 docx 自身计入的 1，合计 8 —— 与基线的 8 基本一致。即累计管线工作既没有让标题数字变好，也没有变坏；先前读到的"改善"来自指标失明。新增 `test/real-material-quality-gap.test.js`（4 例）。
+
+**同轮另需跟进的真实变化（两个方向都有）。** `math-deep.pdf` 的 `unmappedGlyphs` 1295 → 12753、`visualFallbackRegions` 4980 → 16557；`1512.06808v1.pdf` 的 `unmappedGlyphs` 2414 → 1027（改善）。这些与行内算符修复无关，待单独定位。
+
+**行内算符修复无性能回归。** `timingsMs.inlineOperatorMs`：1512 由 9883.99 降至 9863.78，math-deep 由 37446.32 降至 32396.22。
+
+**门禁与回归。** 全量 572 项：571 通过、0 失败、1 跳过。体积预算随新增文件同步（`sourceFiles` 263→264、`totalLines` 58_500→58_531），并同步 `release-check-part1.js` 里与之交叉校验的字面量——该处硬编码了预算字面量，改预算不同步会让 `lightweight_size_budget_enforced` 失败并连带 5 项发布测试。体积、语言边界、发布自动检查、私有转换运行时校验、根目录清洁五项门禁通过。

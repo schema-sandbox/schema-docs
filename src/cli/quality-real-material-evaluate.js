@@ -42,6 +42,20 @@ function safeCaseId(name, sourceHash) {
   return `${stem}-${hashSuffix}`;
 }
 
+// The product's own AI-send gate treats review pages and review regions as
+// blocking, so the evaluator must not report a document as complete while the
+// product refuses to send it.  Regions whose content is preserved only as a
+// rendered image land in these buckets rather than in pendingOcrPages.
+export function deriveRealMaterialQualityGap({ quality = {}, partial = false, validation = null } = {}) {
+  return Number(quality.pendingOcrPages || 0) > 0
+    || Number(quality.unresolvedPages || 0) > 0
+    || Number(quality.failedVisualRegions || 0) > 0
+    || Number(quality.reviewPages || 0) > 0
+    || Number(quality.ocrReviewRegions || 0) > 0
+    || Boolean(partial)
+    || validation?.passed === false;
+}
+
 function isInterruptedError(error) {
   return error?.code === "ETIMEDOUT"
     || error?.code === "TIMEOUT"
@@ -237,10 +251,7 @@ export async function evaluateRealMaterials(argv = process.argv.slice(2)) {
           if (converted.visualMap) await writeFile(path.join(artifactRoot, "visual-map.json"), JSON.stringify(converted.visualMap, null, 2), "utf8");
           const quality = converted.extractionQuality || {};
           const validation = extension === ".pdf" ? validatePdfConversion(converted) : converted.validation || null;
-          const qualityGap = Number(quality.pendingOcrPages || 0) > 0
-            || Number(quality.unresolvedPages || 0) > 0
-            || Number(quality.failedVisualRegions || 0) > 0
-            || Boolean(converted.partial) || validation?.passed === false;
+          const qualityGap = deriveRealMaterialQualityGap({ quality, partial: converted.partial, validation });
           result.status = qualityGap ? "converted_partial" : "converted";
           result.qualityState = qualityGap ? "partial" : "complete";
           result.evidence = {
