@@ -815,3 +815,28 @@ cf. 1962A third body sentence closes it here.
 
 **证据位置。** 本轮探针补在 `.ai-doc-exchange/crosspage-probe/`：`zone-step.py`（记录真实管线为某页算出的分区与其 markdown）、`page-diff.mjs`（整窗逐页哈希）、`p97-lane.py`（在 `column_flow` 保留的字符上量逐行通道）、`stepped.py`（台阶状合成页），均为可重跑小脚本；`p97-lane.py` 会在管线内 monkeypatch `column_flow` 以拿到图/表区域，因此量的是算法真正看到的字符集，而非 `page.chars`。
 
+## §35 页内行尾连字符按文内词表判定：真复合词不再被拼掉（2026-09-23）
+
+**背景与结论。** §34 边界(1) 记下的是 `rejoin_wrapped_prose_lines` 无条件丢掉行尾 `-`，第 97 页因此出现 `hydrogenbonded`，当时把阻塞写成「Python 侧的页内连接器没有词表可用」。本轮把 JS 侧 `reflowPdfParagraphs` 的「拼合词需在文内出现过」判据搬进 Python 页内连接器，并先把那个阻塞消掉：**pypdfium2 取整本 Campbell（1493 页）的全部文本只要 16.1s**，同一批词走 pdfplumber 的布局遍要 11m27s（Ecology 3062 页 6.8s）。词表因此按整份文件建，不随请求的页窗变化——同一页无论被请求多少页，都读成同一段文字。
+
+**规则（`join_prose_line`）。** 行尾连字符只有两种来源，而分开它们的证据只在文档自己的词表里：`hydrogen-` + `bonded` 的拼合形在文内别处作为独立词出现过 → 是断词，连字符丢掉；`backward-induction` 在文内从不无连字符出现 → 拼合只会造出 `backwardinduction`，连字符保留。软连字符（U+00AD）按定义是断词。**没有证据就保留连字符**，这也正是原文的写法。词表 token 取 Unicode 字母（`[^\W\d_]{3,}`），比 JS 侧 `[A-Za-z]{3,}` 宽，希腊字母正文不会因为 ASCII 词表而整篇保留连字符。词表由 `document_words(source)` 在 `main()` 里建一次，经 `run_layout_session` → `extract_layout_page` → `enrich_text_with_math` 以可选尾参传到连接器；四个既有直接调用点（`pdf-layout-session.test.js`、`pdf-r4-regressions.test.js` 两处、会话本身）都不受影响。
+
+**逐 join 测量（真实材料）。** 探针 `hyphen-class.py` 对每个 join 判定 `attestedDoc`（拼合形是否在整本文档里作为独立词出现过），三类材料的答案完全不同：
+
+- **arxiv 1512.06808v1（33–152）**：16 个 join，`attestedDoc=0`，**16 个全部翻转为保留连字符**，样本清一色是真复合词：`three-player`、`dominant-strategy`、`by-products`、`backward-induction`（7 次）、`perfect-information`、`subgame-perfect`、`non-refundable`。改前它们全被拼成 `backwardinduction` 一类。
+- **Ecology（80–199）**：8 个 join，`attestedDoc=0`，**8 个全部翻转**，同样是真复合词：`1-year`、`multi-decadal`、`long-term`、`lower-than-average`、`temperate-zone`、`x-axis`、`short-faced`。
+- **Campbell（96–103）**：66 个 join，`attestedDoc=57`——五分之四是断词，照旧拼合（`car-bon`→`carbon`）；只有 9 个翻转，其中 `luke-warm`、`hydrogen-bonded`、`human-generated` 是真复合词（保留是对的），`dissoci-ating` 是断词（保留属**退化**），其余 5 个（`Cl-|This`、`OH-|In either case`、`atmo-|CO`、`repre-|carbonate`、`carbon-|researchers`）是图文交错造成的跨区垃圾；逐页复核显示保留连字符至少不比粘合差（`Cl-This` 对 `ClThis`、`atmo-CO` 对 `atmoCO`，源文本来就有那个连字符）。
+
+**为什么值得换。** 两份材料的主导类别正好相反：重排版的教科书断词密（Campbell 57/66 是断词，规则照旧拼合），而排版源里观察到的 join 全是复合词（arxiv 0/16、Ecology 0/8）。对科技论文，旧行为是**百分之百的破坏**（把 `backward-induction` 写成 `backwardinduction`），新行为是把它们原样留下——这一类的收益远大于 `dissoci-ating` 一类的代价。
+
+**回归件。** `test/pdf-page-flow.test.js` 新增一例：用 pypdfium2 画一页，正文里先出现 `The international summary stays brief.`，再让正文以 `The inter-` / `national report should merge the word.` 换行，同时有一处 `The hydrogen-` / `bonded pair stays apart.`。断言前者断词被拼合（`international report should merge the word.`，且不出现 `inter- national`）、后者连字符保留（`hydrogen-bonded pair stays apart.`，且不出现 `hydrogenbonded`）——同一页同时证有证据与无证据两侧，且由真实管线（`extractPdfWithLayout`）产出，不是直接调函数。
+
+**逐页复核（A/B 9 窗口 + 改动清单）。** `measure.mjs` 的 9 个真实窗口改前改后输出哈希**全部不同**，而残留计数**一处未变**（28→28、0→0、95→95、4→4、0→0、0→0、0→0、1→1、0→0）——残留指标只认「小写字母 - 空格 小写字母」，对「被拼掉的复合词还原」这一类完全盲，**所以本轮没有计数不变量可给，证据只能是逐页清单加抽样定性**。`hyphen-pages.py` 用 production 自己的页源（`PdfPageWindow`，16 页一窗）在一次抽取内同时跑新旧规则并对照，9 个窗口共 1028 页，其中 **190 页 272 行**不同：Campbell 40–259 是 220 页里 82 页 121 行（96–103 那段 5 页 9 行）；免疫学 60–179 是 120 页里 62 页 100 行（该窗双栏交错最重）；arXiv 33–152 是 15 页 16 行；unit-distance 20–99 是 15 页 15 行；Ecology 80–199 是 6 页 6 行；Feynman 60–179 是 3 页 3 行；math-deep 与 Math4Kids 各 1 页 1 行。全部窗口 `errors=0`。
+
+**抽样定性。** unit-distance 整窗 15 处逐行看过，**15/15 都是数学复合词还原**：`Crossing-lemma`、`unit-distance`、`common-denominator`、`Gaussian-integer`、`conjugation-stable`、`divisor-bound`、`class-number`、`Brauer-Siegel`、`Tsfasman-Vlăduţ`、`ratio-of-integrals`、`high-dimensional`、`polynomial-partitioning`、`Spencer-Szemerédi-Trotter`。其余窗口抽样同样以复合词还原为主：Campbell `hydrogen-bonded`（本轮起因）、`human-generated`、`one-quarter`、`fat-free`、`four-Malate`、`membrane-enclosed`、`Gene-Sized`、`atmo-CO`、`Cl-`、`OH-`；Ecology `lower-than-average`、`long-term`、`temperate-zone`、`short-faced`；math-deep `finite-dimensional`；Feynman `anti-so-and-so`、`three-dimensional`；免疫学 `DNA-binding`、`damage-associ…`，以及软连字符按定义拼合（`primarily`）。**已知退化只有一类**：断词而拼合形在文内从未出现，于是连字符被保留——`dissoci-ating`（Campbell p100）、`discov-ering`（Math4Kids p33）、`white-ness`（Feynman p137）、`orches-trators`（免疫学 p68）。图文交错处（免疫学主导，如 `chemo - kine`）输入行本身已是垃圾，保留源文的连字符不比粘成 `reprecarbonate` 差。计数与逐 join 分类互证：arXiv 的 16 行正对分类的 16 个翻转、Campbell 96–103 的 9 行正对分类的 9 个翻转；Ecology 6 行对分类的 8 个，差在页源不同（复核走 production 的 16 页窗，分类走原始 pdfplumber 页）。
+
+**词表遍的内存纪律。** 这一遍比任何一次页窗都读得多，而 PDFium 把解析出的对象挂在 document 上：Campbell 1493 页整本读完，不重开时峰值 **1102 MB**（增长 1051 MB），每 64 页重开一次降到 **89 MB**（增长 37 MB），两次得到的词表完全相同（29,436 词）；免疫学 579 页 1147 MB → 105 MB。`document_words` 因此按 `REOPEN_WORD_PASS_PAGES = 64` 重开，与布局会话在窗口之间重开是同一个理由、同一个数。
+
+**明确记录、本轮不做的边界。** (1) JS 侧的页内连接器 `joinPdfParagraphLines` 仍无条件丢连字符：`built-in` 抽取路径（以及「页后端未优先」时的文本）仍会把 `backward-induction` 拼掉。它的词表可以免费取自文内 `lines`，判据与本次相同，但改动会翻转 `test/core-documents.test.js` 里那条既有断言（`The international report should merge hyphenated words.`，其词表里并没有 `international`），本轮不动，留作下一项。(2) 词表按整份文件建：对 1493 页的书只要 8 页，也要付那 16s；换来的是页窗无关的确定性。(3) 词表本身未做缓存，只依赖既有的页缓存 identity（含全部 `pdf*.py` 哈希）在源码变更时整体失效。(4) 软连字符一律按断词处理，不查词表。
+
+**证据位置。** `.ai-doc-exchange/crosspage-probe/`：`hyphen-class.py`（逐 join 分类，含 `attestedDoc` 与翻转样本）、`hyphen-class-run.sh`（六个窗口的批量入口）、`hyphen-join.py`（早期按页/窗/文三档作用域对照的探针）、`hyphen-ab.sh` 与 `measure.mjs`（9 窗口 A/B）、`hyphen-pages.py` 与 `hyphen-pages-run.sh`/`hyphen-pages-run2.sh`（逐页改动清单：一次抽取内同时跑新旧规则并对照，用 production 的 `PdfPageWindow` 页源）、`hyphen-pages-full.py` 与 `hyphen-pages-full-run.sh`（同一件事但打印整行，供差异落在行首时定性）、`hyphen-after-check.mjs`（直接读改后 markdown 的连字符清单）、`word-pass-memory.py`（词表遍的 psutil 峰值与重开对照），均为可重跑小脚本。

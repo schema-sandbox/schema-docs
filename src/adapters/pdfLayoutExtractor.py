@@ -1,5 +1,6 @@
 ﻿import argparse
 import copy
+import gc
 import math
 import hashlib
 import json
@@ -2191,7 +2192,69 @@ def rejoin_operator_only_lines(lines):
         merged.append(line)
     return merged
 
-def rejoin_wrapped_prose_lines(lines):
+HYPHEN_TAIL = re.compile(r"([^\W\d_]{2,})[-\u00ad]$")
+HYPHEN_HEAD = re.compile(r"^([^\W\d_]+)")
+DOCUMENT_WORD = re.compile(r"[^\W\d_]{3,}")
+REOPEN_WORD_PASS_PAGES = 64
+
+
+def document_words(source):
+    """Every word the document spells out, which is the evidence the joiner reads.
+
+    pypdfium2 answers this in seconds for a book, where the same words through
+    pdfplumber's layout pass cost minutes.  It is the whole file rather than the
+    requested page window, so a page reads the same however much of the book was
+    asked for.
+
+    PDFium keeps what it parsed attached to the document, so this pass reads far
+    more pages than a window does and must reopen as it goes: without the reopen
+    a 579-page book peaked at 1147 MB, with it 105 MB (3062 pages 309 -> 46 MB).
+    """
+    import pypdfium2 as pdfium
+
+    def open_document():
+        return pdfium.PdfDocument(str(source))
+
+    words = set()
+    document = open_document()
+    try:
+        for index in range(len(document)):
+            if index and index % REOPEN_WORD_PASS_PAGES == 0:
+                document.close()
+                gc.collect()
+                document = open_document()
+            page = document[index]
+            try:
+                text = page.get_textpage().get_text_range() or ""
+            finally:
+                page.close()
+            words.update(DOCUMENT_WORD.findall(str(text).lower()))
+    finally:
+        document.close()
+    return words
+
+
+def join_prose_line(previous, current, vocabulary):
+    """Join a wrapped line, letting a hyphen go only on the document's evidence.
+
+    A line-end hyphen is either a break inside a word or a genuine compound, and
+    the document's own vocabulary tells them apart: ``hydrogen-`` + ``bonded``
+    replays a word spelled out elsewhere, while ``backward-induction`` never
+    occurs unhyphenated, so joining it would invent ``backwardinduction``.  A
+    soft hyphen is a break by definition.  Without that evidence the hyphen
+    stands, which is what the source shows.
+    """
+    if len(previous) > 1 and previous[-1] in ("-", "\u00ad") and previous[-2].isalnum():
+        tail, head = HYPHEN_TAIL.search(previous), HYPHEN_HEAD.match(current)
+        if head and head.group(1)[:1].islower():
+            fragment = tail.group(1) if tail else ""
+            if previous[-1] == "\u00ad" or f"{fragment}{head.group(1)}".lower() in vocabulary:
+                return f"{previous[:-1]}{current}"
+        return f"{previous}{current}"
+    return f"{previous} {current}"
+
+
+def rejoin_wrapped_prose_lines(lines, vocabulary=()):
     s, m = re.compile(r"^(?:#|[-*+]|\d|>|```|\$\$|<!--|\|)"), []
     for raw in lines:
         line = str(raw or "").rstrip(); stripped = line.strip()
@@ -2200,11 +2263,11 @@ def rejoin_wrapped_prose_lines(lines):
                 or re.search(r"[.!?;:)\]\"']$", prev)):
             m.append(line)
         else:
-            m[-1] = f"{prev[:-1] if prev.endswith('-') else prev + ' '}{stripped}"
+            m[-1] = join_prose_line(prev, stripped, vocabulary)
     return m
 
 
-def enrich_text_with_math(text, formulas, page_number):
+def enrich_text_with_math(text, formulas, page_number, vocabulary=()):
     """Replace intact formula-only lines with editable Markdown math blocks."""
     candidates = [region for region in formulas if region.get("editableMathCandidate")]
     fallbacks = [region for region in formulas if region.get("needsVisualFallback") and region.get("assetFile")]
@@ -2319,7 +2382,7 @@ def enrich_text_with_math(text, formulas, page_number):
         else:
             output.append(raw_line.rstrip())
     output = rejoin_operator_only_lines(output)
-    output = rejoin_wrapped_prose_lines(output)
+    output = rejoin_wrapped_prose_lines(output, vocabulary)
     enriched = "\n".join(output).strip()
 
     def blackboard_membership(match):
@@ -2430,7 +2493,7 @@ def render_visual_regions(page, page_number, regions, asset_dir, allow_reuse=Fal
             region["assetError"] = str(error)
 
 
-def extract_layout_page(page, page_number, asset_dir):
+def extract_layout_page(page, page_number, asset_dir, vocabulary=()):
     from pdfLayoutSession import preserve_unknown_glyphs
     from pdfReadingOrder import column_flow, inject_image_markers, paragraph_edges, bind_paragraph_edges, separate_margin_lines, isolate_sidebars
     from pdfRegionOcr import select_regions
@@ -2540,7 +2603,7 @@ def extract_layout_page(page, page_number, asset_dir):
     text = extract_page_text(page, images, flow)
     text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text).rstrip()
     text = normalize_layout_indentation(separate_margin_lines(text, edges))
-    enriched_text = enrich_text_with_math(text, formulas, page_number)
+    enriched_text = enrich_text_with_math(text, formulas, page_number, vocabulary)
     enriched_text = expand_table_markers(enriched_text, tables)
     edges = bind_paragraph_edges(edges, enriched_text)
     cid_artifacts = enriched_text.count("(cid:")
@@ -2623,7 +2686,7 @@ def main():
     from pdfResources import ResourceMonitor
     with ResourceMonitor([Path(args.markdown_output).parent, args.cache_dir, args.asset_dir],
                          args.max_worker_resident_bytes, args.max_temporary_bytes):
-        run_layout_session(args, extract_layout_page)
+        run_layout_session(args, extract_layout_page, document_words(args.source))
 
 
 if __name__ == "__main__":

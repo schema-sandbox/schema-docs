@@ -154,7 +154,7 @@ def preserve_unknown_glyphs(page, page_number, asset_dir, render):
     return [r for r, _ in regions]
 
 
-def run_layout_session(args, extract_page):
+def run_layout_session(args, extract_page, vocabulary=()):
     from pdfPageWindow import PdfPageWindow, PdfiumTextImagePage
     source = Path(args.source)
     initial_stat = source.stat()
@@ -200,14 +200,14 @@ def run_layout_session(args, extract_page):
                 page = document.get_page(index, end)
                 try:
                     try:
-                        payload = extract_page(page, number, assets)
+                        payload = extract_page(page, number, assets, vocabulary)
                     except Exception as error:
                         # Preserve already committed pages and the complete
                         # source appearance of this page. A page-local failure
                         # must not replace the entire document with plain OCR.
                         page.close()
                         page = PdfiumTextImagePage(document.source[index], number, 20_001)
-                        payload = extract_page(page, number, assets)
+                        payload = extract_page(page, number, assets, vocabulary)
                         payload["page"]["backendFailure"] = {
                             "backend": "pdfplumber", "code": type(error).__name__,
                             "message": str(error), "recovery": "source_page_preserved"}

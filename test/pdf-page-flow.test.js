@@ -404,6 +404,40 @@ test("cross-page Chinese prose joins without an inserted space and hyphenated La
   assert.doesNotMatch(result.markdown, /inter- national/);
 });
 
+test("a line-end hyphen follows the document's own words instead of a blanket rule", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hyphen-join-"));
+  try {
+    const source = path.join(root, "hyphen.pdf");
+    const python = await detectPdfLayoutExtractor();
+    const script = `import sys, ctypes as c
+import pypdfium2 as p
+import pypdfium2.raw as r
+doc = p.PdfDocument.new(); page = doc.new_page(520, 720)
+def text(x, y, value):
+    obj = r.FPDFPageObj_NewTextObj(doc, b'Helvetica', 11)
+    data = value.encode('utf-16-le') + b'\\0\\0'
+    r.FPDFText_SetText(obj, (c.c_ushort * (len(data) // 2)).from_buffer_copy(data))
+    r.FPDFPageObj_Transform(obj, 1, 0, 0, 1, x, y); page.insert_obj(p.PdfObject(obj))
+for y, line in [(600, 'The international summary stays brief.'),
+                (586, 'The inter-'),
+                (572, 'national report should merge the word.'),
+                (544, 'The hydrogen-'),
+                (530, 'bonded pair stays apart.')]:
+    text(40, y, line)
+page.gen_content(); doc.save(sys.argv[1]); page.close(); doc.close()
+`;
+    await promisify(execFile)(python.command, [...python.args, "-c", script, source], { windowsHide: true });
+    const result = await extractPdfWithLayout(source);
+    const markdown = result.markdown;
+    // The document spells "international" out, so that break is a break.
+    assert.match(markdown, /international report should merge the word\./, markdown);
+    assert.doesNotMatch(markdown, /inter- ?national/, markdown);
+    // It never spells "hydrogenbonded", so that hyphen is the author's.
+    assert.match(markdown, /hydrogen-bonded pair stays apart\./, markdown);
+    assert.doesNotMatch(markdown, /hydrogenbonded/, markdown);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("sidebar isolation brackets side text and never edits a body character", async () => {
   const python = await detectPdfLayoutExtractor();
   const script = `import json, sys, types
